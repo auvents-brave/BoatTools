@@ -1,0 +1,45 @@
+name: Linux
+on: { push: { branches: [main, lab] }, pull_request: {}, workflow_dispatch: {} }
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.repository }}-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SWIFT_VERSION: "6.3.2"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Swiftly
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates gpg
+          curl -L "https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz" -o swiftly.tar.gz
+          tar zxf swiftly.tar.gz
+          ./swiftly init --assume-yes --skip-install
+          . "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
+          echo "${SWIFTLY_BIN_DIR}" >> "$GITHUB_PATH"
+          swiftly install "${{ env.SWIFT_VERSION }}" --post-install-file=post-install.sh
+          if [ -f post-install.sh ]; then
+            sudo bash ./post-install.sh
+          fi
+          swiftly use "${{ env.SWIFT_VERSION }}"
+      - name: Check Swift Version
+        run: swift --version
+      - name: Install Avahi (Bonjour/mDNS compatibility layer)
+        run: sudo apt-get install -y libavahi-compat-libdnssd-dev
+      - run: swift build -c release
+      - run: swift test

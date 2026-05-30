@@ -1,0 +1,7 @@
+commands.sh
+.DS_Store
+xcode
+.build
+.build-cli
+.swiftpm
+.vscode
