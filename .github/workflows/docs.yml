@@ -1,0 +1,76 @@
+name: Documentation
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.repository }}-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "26.5"
+
+      - name: Build DocC archive
+        run: |
+          xcodebuild docbuild \
+            -scheme "BoatToolsKit" \
+            -destination "generic/platform=macOS" \
+            -derivedDataPath "$PWD/.derivedData"
+
+      - name: Export DocC static site to docs/docc
+        run: |
+          ARCHIVE_PATH="$(find "$PWD/.derivedData" -type d -name "BoatToolsKit.doccarchive" -print -quit)"
+          if [ -z "$ARCHIVE_PATH" ]; then
+            echo "BoatToolsKit.doccarchive not found"
+            exit 1
+          fi
+          mkdir -p "$PWD/docs"
+          xcrun docc process-archive transform-for-static-hosting "$ARCHIVE_PATH" \
+            --output-path "$PWD/docs/docc" \
+            --hosting-base-path "BoatTools/docc"
+
+      - name: Add static landing page at the site root
+        run: |
+          cp -R web/. "$PWD/docs/"
+
+      - name: Validate site entrypoints
+        run: |
+          for f in "docs/index.html" "docs/docc/documentation/boattoolskit/index.html"; do
+            if [ ! -f "$PWD/$f" ]; then
+              echo "Missing $f"
+              find "$PWD/docs" -maxdepth 3 -type f | sed -n '1,120p'
+              exit 1
+            fi
+          done
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ./docs
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
