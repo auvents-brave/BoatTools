@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import BoatToolsKit
@@ -401,5 +402,45 @@ struct AISTests {
     @Test func `An overly short payload yields nil`() {
         // A single 6-bit character carries 6 bits — far below any type's minimum.
         #expect(AISDecoder.decode(payload: "1", fillBits: 0, channel: "A") == nil)
+    }
+
+    // MARK: Multi-part reassembly
+
+    @Test func `Multi-part type 5 with a zero sequential ID assembles and decodes the ship name`() async throws {
+        // A 426-bit type-5 payload split across two AIVDM fragments with an
+        // empty/zero sequential ID (field 3) — the common real-world case. A
+        // per-part fallback key used to scatter the fragments so they never
+        // combined, leaving every target nameless.
+        let (payload, fill) = AISBitWriter.type5(
+            mmsi: 366_000_001, imo: 9_074_729, callsign: "WDE1234",
+            name: "MY VESSEL", shipType: 70, draughtTenthsM: 64, destination: "NEW YORK"
+        ).payload()
+        let mid = payload.index(payload.startIndex, offsetBy: payload.count / 2)
+        let fragment1 = String(payload[..<mid])
+        let fragment2 = String(payload[mid...])
+
+        func vdm(part: Int, _ fragment: String, fillBits: Int) -> String {
+            let body = "AIVDM,2,\(part),0,A,\(fragment),\(fillBits)"
+            let checksum = body.utf8.reduce(UInt8(0)) { $0 ^ $1 }
+            return "!\(body)*\(String(format: "%02X", checksum))"
+        }
+        // First fragment ends on a character boundary, so it has no pad bits;
+        // the original pad count belongs to the final fragment.
+        let log = vdm(part: 1, fragment1, fillBits: 0) + "\n"
+            + vdm(part: 2, fragment2, fillBits: fill) + "\n"
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ais-type5-\(UUID().uuidString).nmea")
+        try log.write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        var shipName: String?
+        for try await fileFrame in NMEATransport.fileStream(path: url.path) {
+            if case .aisTarget(let target) = fileFrame.frame, let name = target.shipName {
+                shipName = name
+                break
+            }
+        }
+        #expect(shipName == "MY VESSEL")
     }
 }

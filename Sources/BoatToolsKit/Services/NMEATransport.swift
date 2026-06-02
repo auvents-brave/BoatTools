@@ -227,17 +227,20 @@ fileprivate final class MultipartAssembler: @unchecked Sendable {
             return (payload, fillBits, channel)
         }
 
-        // Multi-part: accumulate
-        let key = seqId == 0 ? -(partNum) : seqId   // fallback key for zero-ID multipart
-        var acc = pending[key] ?? Accumulator(totalParts: total, parts: [:],
-                                              fillBits: 0, channel: channel)
-        acc.parts[partNum] = payload
-        if partNum == total { acc.fillBits = fillBits }
-        pending[key] = acc
+        // Multi-part: accumulate, keyed by sequential ID. The ID is frequently
+        // absent (field 3 empty → 0); since a message's fragments are transmitted
+        // consecutively, a single slot per ID is enough as long as we (re)start it
+        // whenever the first part arrives.
+        let key = seqId
+        if partNum == 1 || pending[key]?.totalParts != total {
+            pending[key] = Accumulator(totalParts: total, parts: [:], fillBits: 0, channel: channel)
+        }
+        pending[key]?.parts[partNum] = payload
+        if partNum == total { pending[key]?.fillBits = fillBits }
 
-        guard acc.parts.count == total else { return nil }
+        guard let acc = pending[key], acc.parts.count == total else { return nil }
 
-        // All parts received — assemble in order
+        // All parts received — assemble in order.
         pending.removeValue(forKey: key)
         var assembled = ""
         for i in 1 ... total {
@@ -579,7 +582,10 @@ fileprivate final class FrameDispatcher: @unchecked Sendable {
                             payload: assembled.payload,
                             fillBits: assembled.fillBits,
                             channel: assembled.channel) {
-                            emit(.aisTarget(aisTracker.enrich(target)))
+                            var enriched = aisTracker.enrich(target)
+                            // VDO is own vessel's own transponder report.
+                            enriched.isOwnShip = (type == "VDO")
+                            emit(.aisTarget(enriched))
                         }
                         if let metrics = AISDecoder.decodeMeteoMetrics(
                             payload: assembled.payload,
@@ -810,6 +816,68 @@ extension NMEATransport {
                     continuation.finish(throwing: error)
                 }
             }
+        }
+    }
+
+    /// Replays a local log file as a paced stream of ``NMEAFrame`` values, ready
+    /// to pipe into a ``BoatMetricStore``.
+    ///
+    /// Wraps ``fileStream(path:format:decodePGNs:)`` and inserts inter-line delays
+    /// according to `pacing`, so a recorded session plays back like a live source
+    /// (AIS targets, GPS fixes and all). The stream ends when the file is fully
+    /// replayed or the task is cancelled.
+    ///
+    /// - Parameters:
+    ///   - path: Absolute path to the log file.
+    ///   - pacing: Timing strategy — embedded timestamps or a fixed line rate.
+    ///   - loop: When `true`, restart from the top once the file is exhausted, so
+    ///     the recording plays continuously like a live source.
+    ///   - format: Override the auto-detected wire format. Default is `.auto`.
+    ///   - decodePGNs: Whether to emit decoded ``BoatMetric`` frames alongside raw frames.
+    public static func replayStream(
+        path: String,
+        pacing: ReplayPacing,
+        loop: Bool = false,
+        format: NMEAInputFormat = .auto,
+        decodePGNs: Bool = true
+    ) -> AsyncThrowingStream<NMEAFrame, any Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    repeat {
+                        var lastLine = -1
+                        var lastTimestamp: Date?
+                        // A fresh pass each loop — a new file stream re-reads the log.
+                        for try await fileFrame in fileStream(
+                            path: path, format: format, decodePGNs: decodePGNs
+                        ) {
+                            try Task.checkCancellation()
+                            // One delay per source line (a line can yield several frames).
+                            if fileFrame.lineIndex != lastLine {
+                                switch pacing {
+                                case .framesPerSecond(let rate):
+                                    if rate > 0 { try await Task.sleep(for: .seconds(1.0 / rate)) }
+                                case .respectTimestamps:
+                                    if let ts = fileFrame.timestamp, let last = lastTimestamp {
+                                        let delta = ts.timeIntervalSince(last)
+                                        // Clamp gaps so a long pause in the log doesn't stall replay.
+                                        if delta > 0 { try await Task.sleep(for: .seconds(min(delta, 10))) }
+                                    }
+                                }
+                                if let ts = fileFrame.timestamp { lastTimestamp = ts }
+                                lastLine = fileFrame.lineIndex
+                            }
+                            continuation.yield(fileFrame.frame)
+                        }
+                    } while loop && !Task.isCancelled
+                    continuation.finish()
+                } catch is CancellationError {
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { @Sendable _ in task.cancel() }
         }
     }
 

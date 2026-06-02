@@ -145,7 +145,8 @@ public final class SignalKClient: @unchecked Sendable {
                 } catch {
                     continuation.finish(throwing: error)
                 }
-                _ = client // keep the client alive for the stream's lifetime
+                // Shut the HTTP client down before it deinits (or it traps).
+                try? await client.shutdown()
             }
             continuation.onTermination = { @Sendable _ in task.cancel() }
         }

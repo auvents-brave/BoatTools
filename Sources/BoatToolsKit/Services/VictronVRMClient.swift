@@ -243,7 +243,20 @@ public final class VictronVRMClient: @unchecked Sendable {
             config: .init(accessToken: accessToken),
             eventLoopGroup: MultiThreadedEventLoopGroup.singleton
         )
-        return client.frameStream(siteId: siteId, pollInterval: pollInterval)
+        let inner = client.frameStream(siteId: siteId, pollInterval: pollInterval)
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    for try await frame in inner { continuation.yield(frame) }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+                // Shut the HTTP client down before it deinits (or it traps).
+                try? await client.shutdown()
+            }
+            continuation.onTermination = { @Sendable _ in task.cancel() }
+        }
     }
 
     // MARK: Private

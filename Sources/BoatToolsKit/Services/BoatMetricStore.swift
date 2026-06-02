@@ -562,11 +562,21 @@ public final class BoatMetricStore {
     /// All resolved numeric metrics, keyed by canonical name (e.g. `"SOG"`, `"lat"`).
     public private(set) var metrics: [String: BoatMetric] = [:]
 
-    /// AIS targets keyed by MMSI.
+    /// AIS targets keyed by MMSI — **other** vessels only.
     ///
-    /// Targets not updated for 10 minutes are considered stale (check with
-    /// ``isStale(_:)``); targets not updated for 30 minutes are removed.
+    /// Own vessel (a VDO report, or a VDM echoing own MMSI) is excluded and kept
+    /// in ``ownShip`` instead. Targets not updated for 10 minutes are considered
+    /// stale (check with ``isStale(_:)``); targets not updated for 30 minutes are
+    /// removed.
     public private(set) var aisTargets: [Int: AISTarget] = [:]
+
+    /// Own vessel's latest AIS report, learned from VDO sentences (or a VDM that
+    /// echoes own MMSI). `nil` until own transponder is heard.
+    public private(set) var ownShip: AISTarget?
+
+    /// Own vessel's MMSI, once known, so VDM echoes of ourselves are excluded
+    /// from ``aisTargets``.
+    private var ownMMSI: Int?
 
     /// Satellite lists keyed by constellation name.
     ///
@@ -642,6 +652,25 @@ public final class BoatMetricStore {
     public func stop() {
         timerTask?.cancel()
         timerTask = nil
+    }
+
+    /// Clears all published state — metrics and AIS targets (including own ship)
+    /// — so values from a previous source don't linger when switching or
+    /// hard-reconnecting.
+    public func clear() {
+        metrics.removeAll()
+        headingDerivedFromCOG = false
+        clearAIS()
+    }
+
+    /// Clears the AIS state only — every target, the staleness history and the
+    /// own-ship record. Use when switching source so another feed's vessels don't
+    /// linger, without disturbing the current metrics.
+    public func clearAIS() {
+        aisTargets.removeAll()
+        aisLastSeen.removeAll()
+        ownShip = nil
+        ownMMSI = nil
     }
 
     // MARK: Feeding data
@@ -862,6 +891,20 @@ public final class BoatMetricStore {
     }
 
     private func mergeAIS(_ incoming: AISTarget, at now: Date) {
+        // Reject implausible decodes: MMSI is a 9-digit identifier, so anything
+        // outside 1…999 999 999 is a corrupt/misaligned message.
+        guard (1...999_999_999).contains(incoming.mmsi) else { return }
+
+        // Own vessel (VDO, or a VDM echoing our own MMSI) is not an "other
+        // vessel": keep it in `ownShip` and out of `aisTargets`.
+        if incoming.isOwnShip { ownMMSI = incoming.mmsi }
+        if let own = ownMMSI, incoming.mmsi == own {
+            ownShip = incoming
+            aisTargets.removeValue(forKey: incoming.mmsi)  // drop any earlier add
+            aisLastSeen.removeValue(forKey: incoming.mmsi)
+            return
+        }
+
         aisLastSeen[incoming.mmsi] = now
 
         guard let existing = aisTargets[incoming.mmsi] else {

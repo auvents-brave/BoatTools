@@ -181,6 +181,17 @@ public enum NMEAFrame: Sendable, Equatable {
 
 // MARK: - FileFrame
 
+/// Timing strategy for replaying a recorded log with
+/// ``NMEATransport/replayStream(path:pacing:format:decodePGNs:)``.
+public enum ReplayPacing: Sendable, Equatable {
+    /// Reproduce the file's own timing from embedded line timestamps. Lines with
+    /// no timestamp play immediately after the previous one; long gaps are
+    /// clamped so replay never stalls.
+    case respectTimestamps
+    /// Emit at a fixed number of source lines per second (the rate must be > 0).
+    case framesPerSecond(Double)
+}
+
 /// A ``NMEAFrame`` from a local log file, carrying an optional source-line
 /// timestamp for realtime replay.
 ///

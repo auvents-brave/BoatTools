@@ -58,6 +58,10 @@ public struct AISTarget: Sendable, Equatable {
     /// Altitude in metres — populated by SAR aircraft reports (msg type 9).
     public let altitude: Double?
 
+    /// `true` when the report describes own vessel — a VDO sentence, or a VDM
+    /// echoing own MMSI. Set by the transport after decoding; defaults to `false`.
+    public var isOwnShip: Bool = false
+
     /// Creates an AIS target from decoded message fields.
     ///
     /// Memberwise initialiser — see each property for the meaning of its argument.
