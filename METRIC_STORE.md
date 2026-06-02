@@ -97,6 +97,21 @@ Tie-breaking within the same rank (same sentence type, different talkers) is han
 | 4 | NMEA 0183 `HDM` | Magnetic only |
 | 5 | Signal K `navigation.headingTrue` / `headingMagnetic` | |
 
+**Last-resort fallback (COG):** when *no* heading source is available — no
+NMEA / NMEA 2000 heading **and** no device compass (the sensor is absent or
+denied) — the store derives `HDG.true` from **`COG`** (course over ground).
+This keeps a heading available for consumers (e.g. orienting the vessel marker)
+when under way. The derived value is refreshed on every flush and is
+automatically discarded the moment any real heading source appears, so it never
+masks a genuine `HDG.true` / `HDG.magnetic`. It is suppressed while `COG` is
+invalid (e.g. stationary), so no spurious heading is published.
+
+**Magnetic variation from the compass:** when the device compass reports both
+headings, `DeviceSensors` also publishes `magneticVariation` (declination) as the
+signed difference `HDG.true − HDG.magnetic`, normalised to ±180° (positive =
+East). A NMEA / NMEA 2000 source carrying variation directly still wins on
+priority.
+
 ---
 
 ### 5 — Rate of turn (`ROT`)

@@ -85,6 +85,12 @@ public struct NMEATransport: Sendable {
         self.group = group
     }
 
+    /// Opens a connection using the shared NIO event loop, so callers need no
+    /// NIO. Pipe with ``BoatMetricStore/pipe(_:)``.
+    public static func frameStream(config: NMEATransportConfig) -> AsyncThrowingStream<NMEAFrame, any Error> {
+        NMEATransport(config: config, group: MultiThreadedEventLoopGroup.singleton).stream()
+    }
+
     /// Opens the connection and returns an asynchronous frame stream.
     ///
     /// The stream terminates when the remote peer closes the connection or when

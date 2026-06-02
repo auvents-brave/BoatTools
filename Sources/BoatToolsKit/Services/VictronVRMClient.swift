@@ -1,6 +1,7 @@
 public import NIOCore
 internal import Foundation
 internal import AsyncHTTPClient
+internal import NIOPosix
 
 
 // MARK: - VictronVRMClient
@@ -136,6 +137,29 @@ public final class VictronVRMClient: @unchecked Sendable {
         return w.records
     }
 
+    /// Lists the installations (sites) for a VRM account, managing the network
+    /// event loop internally so callers need no NIO — handy for a settings
+    /// "check connection" step.
+    ///
+    /// - Parameters:
+    ///   - accessToken: VRM personal access token.
+    ///   - userId: VRM numeric user (owner) ID.
+    /// - Returns: The account's installations.
+    public static func installations(accessToken: String, userId: Int) async throws -> [Installation] {
+        let client = VictronVRMClient(
+            config: .init(accessToken: accessToken),
+            eventLoopGroup: MultiThreadedEventLoopGroup.singleton
+        )
+        do {
+            let result = try await client.installations(userId: userId)
+            try? await client.shutdown()
+            return result
+        } catch {
+            try? await client.shutdown()
+            throw error
+        }
+    }
+
     /// Fetches the latest diagnostic records for a site.
     ///
     /// - Parameter siteId: The VRM site (installation) ID.
@@ -200,6 +224,26 @@ public final class VictronVRMClient: @unchecked Sendable {
             }
             continuation.onTermination = { @Sendable _ in task.cancel() }
         }
+    }
+
+    /// Polls a VRM site as ``NMEAFrame`` values, managing the network event loop
+    /// internally so callers need no NIO. The returned stream retains the client
+    /// for its lifetime. Pipe with ``BoatMetricStore/pipeSignalK(_:)``.
+    ///
+    /// - Parameters:
+    ///   - accessToken: VRM personal access token.
+    ///   - siteId: VRM site (installation) identifier.
+    ///   - pollInterval: Delay between consecutive polls. Defaults to 60 seconds.
+    public static func frameStream(
+        accessToken: String,
+        siteId: Int,
+        pollInterval: Duration = .seconds(60)
+    ) -> AsyncThrowingStream<NMEAFrame, any Error> {
+        let client = VictronVRMClient(
+            config: .init(accessToken: accessToken),
+            eventLoopGroup: MultiThreadedEventLoopGroup.singleton
+        )
+        return client.frameStream(siteId: siteId, pollInterval: pollInterval)
     }
 
     // MARK: Private

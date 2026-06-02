@@ -791,6 +791,11 @@ public final class BoatMetricStore {
         pruneAISTargets(now: now)
     }
 
+    /// Whether `metrics["HDG.true"]` currently holds a COG-derived fallback
+    /// heading (used as a last resort when no NMEA/NMEA 2000 heading and no
+    /// device compass are available).
+    private var headingDerivedFromCOG = false
+
     private func flush(at now: Date) {
         let (newMetrics, newAIS, newGSV) = (
             collector.candidates.values.map(\.metric),
@@ -800,10 +805,30 @@ public final class BoatMetricStore {
         collector.reset()
         currentSource = .unknown
 
+        // Drop the previous flush's COG-derived heading so it can never mask a
+        // real heading source resolved this flush.
+        if headingDerivedFromCOG {
+            metrics["HDG.true"] = nil
+            headingDerivedFromCOG = false
+        }
+
         // Merge metrics and feed histories.
         for m in newMetrics {
             metrics[m.name] = m
             feedHistory(name: m.name, value: m.value, at: now)
+        }
+
+        // Last-resort heading: when neither a NMEA/NMEA 2000 heading nor the
+        // device compass provides HDG, fall back to COG (course over ground) so
+        // consumers always have a heading. It is refreshed on every flush and is
+        // automatically superseded as soon as a real heading source appears.
+        if metrics["HDG.true"] == nil,
+           metrics["HDG.magnetic"] == nil,
+           let cog = metrics["COG"], cog.value >= 0 {
+            metrics["HDG.true"] = BoatMetric(
+                name: "HDG.true", value: cog.value, unit: cog.unit, timestamp: cog.timestamp
+            )
+            headingDerivedFromCOG = true
         }
 
         // Merge AIS targets (preserve static fields from older reports).
