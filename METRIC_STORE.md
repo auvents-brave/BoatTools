@@ -110,11 +110,15 @@ automatically discarded the moment any real heading source appears, so it never
 masks a genuine `HDG.true` / `HDG.magnetic`. It is suppressed while `COG` is
 invalid (e.g. stationary), so no spurious heading is published.
 
-**Magnetic variation from the compass:** when the device compass reports both
-headings, `DeviceSensors` also publishes `magneticVariation` (declination) as the
+**Derived magnetic variation:** whenever both `HDG.true` and `HDG.magnetic` are
+known but **no** `magneticVariation` was reported, the store derives it as the
 signed difference `HDG.true − HDG.magnetic`, normalised to ±180° (positive =
-East). A NMEA / NMEA 2000 source carrying variation directly still wins on
-priority.
+East = true north east of magnetic north). This is **source-agnostic** — it
+works for the device compass, NMEA 0183, NMEA 2000 and Signal K alike. A source
+that carries variation directly always wins: the reported value is never
+overwritten. Like the COG-derived heading, the derived variation is refreshed on
+every flush (so it tracks changing headings) and is dropped the moment a real
+variation appears.
 
 ---
 

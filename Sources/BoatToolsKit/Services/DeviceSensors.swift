@@ -200,22 +200,11 @@ extension DeviceSensors: @preconcurrency CLLocationManagerDelegate {
                               value: newHeading.magneticHeading,
                               unit: "°", timestamp: newHeading.timestamp))
         if newHeading.trueHeading >= 0 {
+            // Both magnetic and true heading are reported; the store derives the
+            // local magnetic variation from the pair (see ``BoatMetricStore``),
+            // so we no longer compute it here.
             cont.yield(BoatMetric(name: "HDG.true",
                                   value: newHeading.trueHeading,
-                                  unit: "°", timestamp: newHeading.timestamp))
-
-            // The compass reports both magnetic and true heading; their signed
-            // difference is the local magnetic variation (declination), which
-            // iOS derives from the position and the world magnetic model.
-            // Convention: positive = East (true north east of magnetic north).
-            var variation = newHeading.trueHeading - newHeading.magneticHeading
-            if variation > 180 {
-                variation -= 360
-            } else if variation < -180 {
-                variation += 360
-            }
-            cont.yield(BoatMetric(name: "magneticVariation",
-                                  value: variation,
                                   unit: "°", timestamp: newHeading.timestamp))
         }
     }
