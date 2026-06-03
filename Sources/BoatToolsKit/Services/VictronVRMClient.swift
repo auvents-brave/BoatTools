@@ -180,7 +180,15 @@ public final class VictronVRMClient: @unchecked Sendable {
     public func metrics(siteId: Int) async throws -> [BoatMetric] {
         let records = try await diagnostics(siteId: siteId)
         return records.compactMap { r in
-            guard let v = r.rawValue, let n = r.description else { return nil }
+            guard let n = r.description else { return nil }
+            let v: Double
+            if let raw = r.rawValue {
+                v = raw
+            } else if let derived = Self.booleanValue(description: n, formatted: r.formattedValue) {
+                v = derived
+            } else {
+                return nil
+            }
             // Map the common Victron devices/measurements onto the canonical
             // metric names so the rest of the app (instruments, etc.) recognises
             // them. Anything unmapped keeps its human-readable name.
@@ -195,15 +203,18 @@ public final class VictronVRMClient: @unchecked Sendable {
         }
     }
 
-    /// Maps a VRM (device, description, instance) triple to a canonical metric
-    /// name, or `nil` when there's no confident match. Matches are exact on the
-    /// lower-cased Victron description, so siblings like "Starter battery
-    /// voltage" don't collide with "Voltage".
+    /// Maps a VRM (device, description, instance) to a canonical metric name.
+    /// For a recognised device, *every* numeric measurement nests under the
+    /// device's canonical prefix (`battery.0.`, `tank.23.`…) — mapped readings
+    /// get tidy leaves, the rest are slugged — so a pill's detail can show the
+    /// whole device. Unknown devices return `nil` (kept human-readable).
     static func canonicalName(device: String?, description: String, instance: Int?) -> String? {
         let i = instance ?? 0
         let d = description.lowercased()
         let dev = (device ?? "").lowercased()
 
+        // The gateway carries the boat's position (plus system settings we leave
+        // alone).
         if dev.contains("gateway") {
             switch d {
             case "latitude":  return "lat"
@@ -211,37 +222,64 @@ public final class VictronVRMClient: @unchecked Sendable {
             default:          return nil
             }
         }
-        if dev.contains("battery monitor") || dev.contains("smartshunt") || dev.contains("bmv") {
-            switch d {
-            case "voltage":                 return "battery.\(i).voltage"
-            case "current":                 return "battery.\(i).current"
-            case "battery temperature":     return "battery.\(i).temperature"
-            case "state of charge":         return "battery.\(i).soc"
-            case "consumed amphours":       return "battery.\(i).consumedAh"
-            case "time to go":              return "battery.\(i).timeToGo"
-            case "starter battery voltage": return "battery.\(i).starterVoltage"
-            case "capacity":                return "battery.\(i).capacity"
-            default:                        return nil
-            }
+
+        let prefix: String
+        if dev.contains("battery monitor") || dev.contains("smartshunt") || dev.contains("bmv") { prefix = "battery" }
+        else if dev.contains("solar charger") || dev.contains("mppt") { prefix = "solar" }
+        else if dev.contains("tank") { prefix = "tank" }
+        else if dev.contains("ve.bus") { prefix = "vebus" }
+        else if dev.contains("system overview") { prefix = "system" }
+        else { return nil }
+
+        return "\(prefix).\(i).\(mappedLeaf(prefix: prefix, description: d) ?? slug(description))"
+    }
+
+    /// A tidy canonical leaf for a recognised measurement, or `nil` to slug it.
+    private static func mappedLeaf(prefix: String, description d: String) -> String? {
+        switch (prefix, d) {
+        case ("battery", "voltage"):                          return "voltage"
+        case ("battery", "current"):                          return "current"
+        case ("battery", "battery temperature"):              return "temperature"
+        case ("battery", "state of charge"):                  return "soc"
+        case ("battery", "consumed amphours"):                return "consumedAh"
+        case ("battery", "time to go"):                       return "timeToGo"
+        case ("battery", "starter battery voltage"):          return "starterVoltage"
+        case ("battery", "capacity"):                         return "capacity"
+        case ("solar", "voltage"):                            return "voltage"
+        case ("solar", "current"):                            return "current"
+        case ("solar", "pv voltage"):                         return "pvVoltage"
+        case ("solar", "pv power"):                           return "pvPower"
+        case ("solar", "battery watts"):                      return "power"
+        case ("solar", "yield today"):                        return "yieldToday"
+        case ("tank", "tank level"), ("tank", "level"):       return "level"
+        case ("tank", "tank capacity"), ("tank", "capacity"): return "capacity"
+        case ("vebus", "active input current limit"):         return "activeInputCurrentLimit"
+        case ("vebus", "ac input 1 current limit"):           return "input1CurrentLimit"
+        case ("vebus", "ac input 2 current limit"):           return "input2CurrentLimit"
+        case ("system", "ac input 1 connected"):              return "input1Connected"
+        case ("system", "ac input 2 connected"):              return "input2Connected"
+        default:                                              return nil
         }
-        if dev.contains("solar charger") || dev.contains("mppt") {
-            switch d {
-            case "voltage":       return "solar.\(i).voltage"
-            case "current":       return "solar.\(i).current"
-            case "pv voltage":    return "solar.\(i).pvVoltage"
-            case "pv power":      return "solar.\(i).pvPower"
-            case "battery watts": return "solar.\(i).power"
-            case "yield today":   return "solar.\(i).yieldToday"
-            default:              return nil
-            }
+    }
+
+    /// A dot-free camelCase leaf from a description ("Tank fluid type" →
+    /// "tankFluidType"), so unmapped numeric readings still nest under the device.
+    private static func slug(_ description: String) -> String {
+        let words = description.split { !$0.isLetter && !$0.isNumber }
+        guard let first = words.first else { return "value" }
+        return words.dropFirst().reduce(String(first).lowercased()) {
+            $0 + $1.prefix(1).uppercased() + $1.dropFirst().lowercased()
         }
-        if dev.contains("tank") {
-            switch d {
-            case "tank level", "level":       return "tank.\(i).level"
-            case "tank capacity", "capacity": return "tank.\(i).capacity"
-            default:                          return nil
-            }
-        }
+    }
+
+    /// A 0/1 value for boolean-style measurements whose raw value is text
+    /// ("Connected" / "Not connected"). Only applied to "connected" fields so it
+    /// doesn't flood the feed with every status flag.
+    static func booleanValue(description: String, formatted: String?) -> Double? {
+        guard description.lowercased().contains("connected"),
+              let f = formatted?.lowercased() else { return nil }
+        if f.contains("not") || f.contains("disconnected") { return 0 }
+        if f.contains("connected") { return 1 }
         return nil
     }
 
