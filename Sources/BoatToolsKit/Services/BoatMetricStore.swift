@@ -572,6 +572,16 @@ public final class BoatMetricStore {
     /// removed.
     public private(set) var aisTargets: [Int: AISTarget] = [:]
 
+    /// Optional human display names for metric prefixes (e.g. `"battery.0"` →
+    /// `"Lynx 24"`), supplied by sources that carry custom device names such as
+    /// Victron VRM. Consumers may use these to label instruments.
+    public private(set) var labels: [String: String] = [:]
+
+    /// Merges display names into ``labels`` (existing keys are overwritten).
+    public func setLabels(_ newLabels: [String: String]) {
+        for (key, name) in newLabels { labels[key] = name }
+    }
+
     /// Own vessel's latest AIS report, learned from VDO sentences (or a VDM that
     /// echoes own MMSI). `nil` until own transponder is heard.
     public private(set) var ownShip: AISTarget?

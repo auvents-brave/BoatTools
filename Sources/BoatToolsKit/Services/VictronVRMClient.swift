@@ -245,6 +245,43 @@ public final class VictronVRMClient: @unchecked Sendable {
         return nil
     }
 
+    /// Fetches custom device names for a site, keyed by canonical metric prefix
+    /// (e.g. `"battery.0"` → `"Lynx 24"`), so instruments can show meaningful
+    /// labels. A one-shot call — custom names rarely change.
+    public static func labels(accessToken: String, siteId: Int) async throws -> [String: String] {
+        let client = VictronVRMClient(
+            config: .init(accessToken: accessToken),
+            eventLoopGroup: MultiThreadedEventLoopGroup.singleton
+        )
+        // The HTTP client must be shut down before it deinits, even on throw.
+        let records: [DiagnosticRecord]
+        do {
+            records = try await client.diagnostics(siteId: siteId)
+        } catch {
+            try? await client.shutdown()
+            throw error
+        }
+        try? await client.shutdown()
+        var result: [String: String] = [:]
+        for record in records {
+            guard let name = record.formattedValue, !name.isEmpty,
+                  let key = labelKey(device: record.device, description: record.description, instance: record.instance)
+            else { continue }
+            result[key] = name
+        }
+        return result
+    }
+
+    private static func labelKey(device: String?, description: String?, instance: Int?) -> String? {
+        guard let d = description?.lowercased() else { return nil }
+        let i = instance ?? 0
+        let dev = (device ?? "").lowercased()
+        if d == "battery custom name", dev.contains("battery monitor") || dev.contains("smartshunt") { return "battery.\(i)" }
+        if d == "solar charger custom name" { return "solar.\(i)" }
+        if d == "tank custom name" { return "tank.\(i)" }
+        return nil
+    }
+
     /// Continuously polls a VRM site and yields each batch as ``NMEAFrame``
     /// values, making the client directly compatible with ``BoatMetricStore``.
     ///
