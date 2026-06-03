@@ -94,7 +94,12 @@ public final class DeviceSensors: NSObject {
 
             if config.gps {
                 manager.desiredAccuracy = kCLLocationAccuracyBest
+                #if os(tvOS)
+                // tvOS has no continuous location updates — request a single fix.
+                manager.requestLocation()
+                #else
                 manager.startUpdatingLocation()
+                #endif
             }
 
             // Heading: startUpdatingHeading() is unavailable on macOS and tvOS
@@ -134,7 +139,9 @@ public final class DeviceSensors: NSObject {
     }
 
     private func stopAll() {
+        #if !os(tvOS)
         manager.stopUpdatingLocation()
+        #endif
         #if !os(macOS) && !os(tvOS)
         manager.stopUpdatingHeading()
         #endif
