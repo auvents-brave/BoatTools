@@ -51,8 +51,13 @@ fileprivate func formatMetricValue(_ m: BoatMetric) -> String {
     case "lon",
          "waypoint.lon",
          "weatherStation.lon":   return formatCoordDDM(v, isLatitude: false)
-    case "SOG", "STW", "AWS", "TWS", "TWS.gust":
+    case "SOG", "STW", "AWS", "TWS", "TWS.gust",
+         "speed.water.transverse", "speed.ground.transverse":
                                  return String(format: "%.1f kn", v)
+    case "utc.timestamp":
+        let formatter = ISO8601DateFormatter()
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter.string(from: Date(timeIntervalSince1970: v))
     case "COG", "AWA", "TWA", "TWD", "TWD.gust", "HDG":
                                  return String(format: "%.1f°", v)
     case "HDG.true":             return String(format: "%.1f° T", v)
@@ -168,7 +173,7 @@ fileprivate func formatMetricValue(_ m: BoatMetric) -> String {
         // Per-category pressures (water, hydraulic, …) — already in hPa
         if m.name.hasPrefix("pressure.")    { return String(format: "%.0f hPa", v) }
         // Engine/shaft RPM via the .rpm suffix is handled above; pitch is a %
-        if m.name.hasSuffix(".pitch")       { return String(format: "%.0f %%", v) }
+        if m.name.hasSuffix(".pitch")       { return String(format: "%.1f %%", v) }
         // Alarm states (0/1) and power-device on/off states
         if m.name.hasPrefix("alarm.") || m.name.hasSuffix(".state") {
             switch Int(v) {
@@ -301,7 +306,9 @@ fileprivate func render(_ frame: NMEAFrame) {
 
     case .metric(let m):
         let value = formatMetricValue(m)
-        print("   ↳ \(m.name.padding(toLength: 24, withPad: " ", startingAt: 0)) \(value)")
+        // Pad the name column to at least 24 chars, but never truncate longer names.
+        let name = m.name.padding(toLength: max(24, m.name.count), withPad: " ", startingAt: 0)
+        print("   ↳ \(name) \(value)")
 
     case .aisTarget(let t):
         renderAIS(t)

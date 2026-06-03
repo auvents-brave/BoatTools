@@ -71,7 +71,8 @@ Tie-breaking within the same rank (same sentence type, different talkers) is han
 | 1 | PGN `129026` COG & SOG Rapid Update | Dedicated, high rate |
 | 2 | NMEA 0183 `VTG` | Dedicated sentence |
 | 3 | NMEA 0183 `RMC` | Combined with position, lower confidence |
-| 4 | Signal K `navigation.speedOverGround` / `courseOverGroundTrue` | |
+| 4 | NMEA 0183 `VBW` | Longitudinal ground speed only (`SOG`; carries no `COG`); ignores the transverse component |
+| 5 | Signal K `navigation.speedOverGround` / `courseOverGroundTrue` | |
 
 **Tie-break:** same talker priority as position.
 
@@ -82,8 +83,11 @@ Tie-breaking within the same rank (same sentence type, different talkers) is han
 | Rank | Source | Why |
 |------|--------|-----|
 | 1 | PGN `128259` Speed | Dedicated |
-| 2 | NMEA 0183 `VHW` | Dedicated |
-| 3 | Signal K `navigation.speedThroughWater` | |
+| 2 | NMEA 0183 `VHW` | Dedicated water-speed sentence |
+| 3 | NMEA 0183 `VBW` | Longitudinal water speed (dual ground/water sentence) |
+| 4 | Signal K `navigation.speedThroughWater` | |
+
+> `VBW` also emits `speed.water.transverse` and `speed.ground.transverse` (leeway / sideways set). These have no competing source, so they pass through at the default rank and never collide with `STW`/`SOG`.
 
 ---
 
@@ -227,7 +231,7 @@ The `metrics` dict holds **every** `BoatMetric` produced by the priority resolve
 | Category | Example keys |
 |---|---|
 | Position | `lat`, `lon`, `altitude` |
-| Speed / course | `SOG`, `COG`, `STW`, `ROT` |
+| Speed / course | `SOG`, `COG`, `STW`, `ROT`, `speed.water.transverse`, `speed.ground.transverse` |
 | Heading | `HDG.true`, `HDG.magnetic`, `magneticVariation` |
 | Wind | `TWS`, `TWD`, `AWS`, `AWA` |
 | Depth | `depth`, `depth.offset` |

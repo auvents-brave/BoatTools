@@ -397,7 +397,8 @@ private enum PriorityResolver {
         case .nmea2000(pgn: 129026):        return 10   // COG & SOG Rapid Update
         case .nmea0183(_, type: "VTG"):     return 20
         case .nmea0183(_, type: "RMC"):     return 30
-        case .signalK:                      return 40
+        case .nmea0183(_, type: "VBW"):     return 40   // longitudinal ground speed only (SOG; no COG)
+        case .signalK:                      return 50
         default:                            return 100
         }
     }
@@ -405,8 +406,9 @@ private enum PriorityResolver {
     private static func stwRank(_ s: SourceKind) -> Int {
         switch s {
         case .nmea2000(pgn: 128259):        return 10   // Speed
-        case .nmea0183(_, type: "VHW"):     return 20
-        case .signalK:                      return 30
+        case .nmea0183(_, type: "VHW"):     return 20   // dedicated water-speed sentence
+        case .nmea0183(_, type: "VBW"):     return 30   // longitudinal water speed
+        case .signalK:                      return 40
         default:                            return 100
         }
     }

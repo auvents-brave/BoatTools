@@ -69,7 +69,7 @@ public final class DeviceSensors: NSObject {
     // but Apple marks the class @unavailable on those two platforms in the SDK
     // (no barometer hardware).  Use canImport(CoreMotion) as the primary gate
     // and explicitly exclude the two SDK-restricted platforms.
-    #if canImport(CoreMotion) && !os(macOS) && !os(tvOS)
+    #if canImport(CoreMotion) && !os(macOS) && !os(tvOS) && !os(visionOS)
     private let altimeter = CMAltimeter()
     #endif
 
@@ -106,7 +106,7 @@ public final class DeviceSensors: NSObject {
             // (no compass hardware, API_UNAVAILABLE in the SDK).  Negative guard
             // mirrors the barometer pattern and automatically covers iOS,
             // macCatalyst, watchOS, and visionOS (Vision Pro has a magnetometer).
-            #if !os(macOS) && !os(tvOS)
+            #if !os(macOS) && !os(tvOS) && !os(visionOS)
             if config.heading && CLLocationManager.headingAvailable() {
                 manager.startUpdatingHeading()
             }
@@ -118,7 +118,7 @@ public final class DeviceSensors: NSObject {
             // the two SDK-restricted platforms explicitly.
             // isRelativeAltitudeAvailable() handles hardware absence at runtime
             // (e.g. older Apple Watch models without a barometer).
-            #if canImport(CoreMotion) && !os(macOS) && !os(tvOS)
+            #if canImport(CoreMotion) && !os(macOS) && !os(tvOS) && !os(visionOS)
             if config.barometer && CMAltimeter.isRelativeAltitudeAvailable() {
                 altimeter.startRelativeAltitudeUpdates(to: .main) { [weak self] data, _ in
                     guard let self, let p = data?.pressure else { return }
@@ -142,10 +142,10 @@ public final class DeviceSensors: NSObject {
         #if !os(tvOS)
         manager.stopUpdatingLocation()
         #endif
-        #if !os(macOS) && !os(tvOS)
+        #if !os(macOS) && !os(tvOS) && !os(visionOS)
         manager.stopUpdatingHeading()
         #endif
-        #if canImport(CoreMotion) && !os(macOS) && !os(tvOS)
+        #if canImport(CoreMotion) && !os(macOS) && !os(tvOS) && !os(visionOS)
         altimeter.stopRelativeAltitudeUpdates()
         #endif
         continuation?.finish()
@@ -192,7 +192,7 @@ extension DeviceSensors: @preconcurrency CLLocationManagerDelegate {
     // didUpdateHeading is unavailable on macOS and tvOS (no compass hardware).
     // Negative guard mirrors startUpdatingHeading() above and covers iOS,
     // macCatalyst, watchOS, and visionOS automatically.
-    #if !os(macOS) && !os(tvOS)
+    #if !os(macOS) && !os(tvOS) && !os(visionOS)
     public func locationManager(_ manager: CLLocationManager,
                                 didUpdateHeading newHeading: CLHeading) {
         guard let cont = continuation else { return }
