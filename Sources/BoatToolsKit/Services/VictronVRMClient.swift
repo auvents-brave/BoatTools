@@ -97,7 +97,7 @@ public final class VictronVRMClient: @unchecked Sendable {
             guard let f = formatWithUnit, !f.isEmpty else { return nil }
             var s = f
             if let r = s.range(
-                of: #"%[-+ #0]*[0-9]*\.?[0-9]*[lhLqjzt]*[diouxXeEfgGsaAcCpn%]"#,
+                of: #"%[-+ #0]*[0-9]*\.?[0-9]*[lhLqjzt]*[diouxXeEfFgGsaAcCpn%]"#,
                 options: .regularExpression
             ) { s.removeSubrange(r) }
             s = s.trimmingCharacters(in: .whitespaces)
