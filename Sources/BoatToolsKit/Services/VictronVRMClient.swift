@@ -181,10 +181,68 @@ public final class VictronVRMClient: @unchecked Sendable {
         let records = try await diagnostics(siteId: siteId)
         return records.compactMap { r in
             guard let v = r.rawValue, let n = r.description else { return nil }
+            // Map the common Victron devices/measurements onto the canonical
+            // metric names so the rest of the app (instruments, etc.) recognises
+            // them. Anything unmapped keeps its human-readable name.
+            if let canonical = Self.canonicalName(device: r.device, description: n, instance: r.instance) {
+                // VRM reports latitude/longitude with "LAT"/"LNG" units; normalise.
+                let unit = (canonical == "lat" || canonical == "lon") ? "°" : r.unit
+                return BoatMetric(name: canonical, value: v, unit: unit)
+            }
             let tag = r.deviceTag
             let fullName = tag.isEmpty ? n : "\(tag) — \(n)"
             return BoatMetric(name: fullName, value: v, unit: r.unit)
         }
+    }
+
+    /// Maps a VRM (device, description, instance) triple to a canonical metric
+    /// name, or `nil` when there's no confident match. Matches are exact on the
+    /// lower-cased Victron description, so siblings like "Starter battery
+    /// voltage" don't collide with "Voltage".
+    static func canonicalName(device: String?, description: String, instance: Int?) -> String? {
+        let i = instance ?? 0
+        let d = description.lowercased()
+        let dev = (device ?? "").lowercased()
+
+        if dev.contains("gateway") {
+            switch d {
+            case "latitude":  return "lat"
+            case "longitude": return "lon"
+            default:          return nil
+            }
+        }
+        if dev.contains("battery monitor") || dev.contains("smartshunt") || dev.contains("bmv") {
+            switch d {
+            case "voltage":                 return "battery.\(i).voltage"
+            case "current":                 return "battery.\(i).current"
+            case "battery temperature":     return "battery.\(i).temperature"
+            case "state of charge":         return "battery.\(i).soc"
+            case "consumed amphours":       return "battery.\(i).consumedAh"
+            case "time to go":              return "battery.\(i).timeToGo"
+            case "starter battery voltage": return "battery.\(i).starterVoltage"
+            case "capacity":                return "battery.\(i).capacity"
+            default:                        return nil
+            }
+        }
+        if dev.contains("solar charger") || dev.contains("mppt") {
+            switch d {
+            case "voltage":       return "solar.\(i).voltage"
+            case "current":       return "solar.\(i).current"
+            case "pv voltage":    return "solar.\(i).pvVoltage"
+            case "pv power":      return "solar.\(i).pvPower"
+            case "battery watts": return "solar.\(i).power"
+            case "yield today":   return "solar.\(i).yieldToday"
+            default:              return nil
+            }
+        }
+        if dev.contains("tank") {
+            switch d {
+            case "tank level", "level":       return "tank.\(i).level"
+            case "tank capacity", "capacity": return "tank.\(i).capacity"
+            default:                          return nil
+            }
+        }
+        return nil
     }
 
     /// Continuously polls a VRM site and yields each batch as ``NMEAFrame``
