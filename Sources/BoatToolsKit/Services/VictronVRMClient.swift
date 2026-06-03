@@ -273,6 +273,8 @@ public final class VictronVRMClient: @unchecked Sendable {
                     while !Task.isCancelled {
                         let batch = try await self.metrics(siteId: siteId)
                         for m in batch { continuation.yield(.metric(m)) }
+                        // A non-positive interval means snapshot-only: poll once.
+                        if pollInterval <= .zero { break }
                         try await Task.sleep(for: pollInterval)
                     }
                     continuation.finish()
