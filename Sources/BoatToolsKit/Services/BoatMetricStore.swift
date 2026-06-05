@@ -667,9 +667,14 @@ public final class BoatMetricStore {
     }
 
     /// Clears all published state — metrics and AIS targets (including own ship)
-    /// — so values from a previous source don't linger when switching or
-    /// hard-reconnecting.
+    /// — so values from a previous source don't linger when switching, hard-
+    /// reconnecting or disconnecting.
+    ///
+    /// The pending 1-second window is reset too: without this, frames already
+    /// collected but not yet flushed would reappear on the next tick, so values
+    /// would briefly come back after a disconnect.
     public func clear() {
+        collector.reset()
         metrics.removeAll()
         headingDerivedFromCOG = false
         clearAIS()
