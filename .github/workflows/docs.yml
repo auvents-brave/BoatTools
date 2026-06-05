@@ -43,9 +43,22 @@ jobs:
             --output-path "$PWD/docs/docc" \
             --hosting-base-path "BoatTools/docc"
 
-      - name: Add static landing page at the site root
+      - name: Add a redirect landing page at the site root
         run: |
-          cp -R web/. "$PWD/docs/"
+          cat > "$PWD/docs/index.html" <<'HTML'
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8">
+              <meta http-equiv="refresh" content="0; url=/BoatTools/docc/documentation/boattoolskit/">
+              <script>window.location.replace("/BoatTools/docc/documentation/boattoolskit/")</script>
+              <title>BoatTools Documentation</title>
+            </head>
+            <body>
+              Redirecting to <a href="/BoatTools/docc/documentation/boattoolskit/">BoatTools documentation</a>…
+            </body>
+          </html>
+          HTML
 
       - name: Validate site entrypoints
         run: |
