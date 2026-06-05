@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BoatTools — Swift CLI &amp; library for sailboat data</title>
+<meta name="description" content="A Swift command-line tool and library to read, decode and replay boat instrument data — NMEA 0183, NMEA 2000, Signal K and Victron VRM — with AIS target tracking and LAN auto-discovery.">
+<style>
+  :root {
+    --blue-900: #08182f;
+    --blue-800: #0b2746;
+    --blue-700: #103a6b;
+    --cyan:     #2ec4d6;
+    --cyan-soft:#93d5e6;
+    --orange:   #f5821f;
+    --orange-700:#d96d12;
+    --ink:      #eaf4fb;
+    --ink-dim:  #a9c4d8;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background:
+      radial-gradient(1200px 600px at 85% -10%, rgba(46,196,214,0.18), transparent 60%),
+      radial-gradient(900px 500px at 0% 110%, rgba(245,130,31,0.14), transparent 55%),
+      linear-gradient(160deg, var(--blue-800), var(--blue-900));
+    min-height: 100vh;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 20px 64px; }
+
+  /* Header */
+  header { text-align: center; margin-bottom: 44px; }
+  .logo { width: 96px; height: 96px; margin: 0 auto 14px; display: block; }
+  h1 { font-size: 2.6rem; margin: 0 0 6px; letter-spacing: -0.5px; }
+  h1 .accent { color: var(--orange); }
+  .tagline { color: var(--cyan-soft); font-size: 1.12rem; margin: 0 auto 16px; max-width: 640px; }
+  .badges img { height: 22px; vertical-align: middle; margin: 4px; }
+
+  /* Pills (rounded cards) */
+  .pill {
+    background: linear-gradient(180deg, rgba(16,58,107,0.55), rgba(11,39,70,0.65));
+    border: 1px solid rgba(46,196,214,0.25);
+    border-radius: 26px;
+    padding: 30px 30px 34px;
+    margin: 26px 0;
+    box-shadow: 0 18px 50px rgba(0,0,0,0.35);
+  }
+  .pill h2 { margin: 0 0 4px; font-size: 1.5rem; }
+  .pill h2 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--orange); }
+  .pill .sub { color: var(--ink-dim); margin: 0 0 18px; }
+  .pill p.lead { color: var(--ink); margin: 0 0 22px; }
+  .pill ul { margin: 0 0 22px; padding-left: 1.1em; color: var(--ink-dim); }
+  .pill ul li { margin: 3px 0; }
+
+  /* Buttons */
+  .btns { display: flex; flex-wrap: wrap; gap: 12px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    text-decoration: none; font-weight: 600; font-size: 0.98rem;
+    padding: 11px 18px; border-radius: 999px; border: 1.5px solid transparent;
+    transition: transform .08s ease, filter .15s ease;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn-orange { background: var(--orange); color: #1a0f02; }
+  .btn-orange:hover { filter: brightness(1.07); }
+  .btn-cyan { background: transparent; color: var(--cyan); border-color: var(--cyan); }
+  .btn-cyan:hover { background: rgba(46,196,214,0.12); }
+  .btn small { font-weight: 500; opacity: 0.8; }
+
+  .note { color: var(--ink-dim); font-size: 0.86rem; margin-top: 16px; }
+  .note strong { color: var(--cyan-soft); }
+  .dev { color: var(--ink-dim); font-size: 0.8rem; margin-top: 10px; }
+  .dev a { color: var(--cyan); text-decoration: none; }
+  .dev a:hover { text-decoration: underline; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: rgba(0,0,0,0.28); padding: 1px 6px; border-radius: 6px; color: var(--cyan-soft); }
+
+  footer { text-align: center; color: var(--ink-dim); font-size: 0.86rem; margin-top: 40px; }
+  footer a { color: var(--cyan); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <!-- LOGO — original SVG placeholder. To use the lesvagabondages.com logo,
+         drop a file at web/logo.png and replace this <svg> with:
+         <img class="logo" src="logo.png" alt="BoatTools"> -->
+    <svg class="logo" viewBox="0 0 100 100" role="img" aria-label="BoatTools logo">
+      <circle cx="50" cy="50" r="47" fill="none" stroke="#2ec4d6" stroke-width="3"/>
+      <!-- sail -->
+      <path d="M50 20 L50 62 L26 62 Z" fill="#f5821f"/>
+      <path d="M54 28 L72 62 L54 62 Z" fill="#2ec4d6"/>
+      <!-- hull -->
+      <path d="M22 66 L78 66 L70 78 L30 78 Z" fill="#93d5e6"/>
+      <!-- waterline -->
+      <path d="M14 84 q12 -7 24 0 t24 0 t24 0" fill="none" stroke="#2ec4d6" stroke-width="3" stroke-linecap="round"/>
+    </svg>
+    <h1>Boat<span class="accent">Tools</span></h1>
+    <p class="tagline">A Swift command-line tool &amp; library to read, decode and replay boat instrument data — NMEA 0183, NMEA 2000, Signal K and Victron VRM — with AIS target tracking and LAN auto-discovery.</p>
+    <p class="badges">
+      <img src="https://img.shields.io/github/v/release/auvents-brave/BoatTools?include_prereleases&display_name=tag&label=latest&color=f5821f&labelColor=08182f" alt="Latest release">
+      <img src="https://img.shields.io/badge/Swift-6.3-f5821f?labelColor=08182f" alt="Swift 6.3">
+      <img src="https://img.shields.io/badge/platforms-macOS%20%7C%20Linux-2ec4d6?labelColor=08182f" alt="Platforms">
+    </p>
+  </header>
+
+  <!-- CLI pill -->
+  <section class="pill">
+    <h2><span class="mono">boattools</span> — command-line tool</h2>
+    <p class="sub">For sailors &amp; tinkerers</p>
+    <p class="lead">Connect to your gateway or MFD over TCP/UDP, stream Signal K over the network (TCP, REST or WebSocket), replay recorded logs, browse the LAN for instruments, and read your Victron VRM site — all from the terminal, with live colour output.</p>
+    <ul>
+      <li><code>connect</code> — TCP / UDP / Signal K (ws · http · NDJSON)</li>
+      <li><code>file</code> — replay NMEA 0183/2000, YD RAW, SeaSmart, Canboat, iKonvert &amp; Signal K logs</li>
+      <li><code>vrm</code> — Victron VRM cloud</li>
+      <li><code>discover</code> — Bonjour/mDNS LAN discovery</li>
+    </ul>
+    <div class="btns">
+      <a class="btn btn-orange" href="https://github.com/auvents-brave/BoatTools/releases/latest/download/boattools-macos-universal.pkg">⬇︎ macOS <small>(notarised .pkg · Apple&nbsp;Silicon&nbsp;+&nbsp;Intel)</small></a>
+      <a class="btn btn-orange" href="https://github.com/auvents-brave/BoatTools/releases/latest/download/boattools-linux-x86_64.tar.gz">⬇︎ Linux <small>(x86_64)</small></a>
+      <a class="btn btn-orange" href="https://github.com/auvents-brave/BoatTools/releases/latest">All releases &amp; assets →</a>
+    </div>
+    <p class="note">✓ The macOS <code>.pkg</code> is signed and <strong>notarised by Apple</strong> — it installs without any Gatekeeper warning. Each download ships a matching <code>.sha256</code> for verification.</p>
+    <p class="dev">Development snapshots (tip of the <code>lab</code> branch — <em>unstable, for the adventurous</em>):
+      <a href="https://github.com/auvents-brave/BoatTools/releases/download/lab/boattools-macos-universal.pkg">macOS</a> ·
+      <a href="https://github.com/auvents-brave/BoatTools/releases/download/lab/boattools-linux-x86_64.tar.gz">Linux</a> ·
+      <a href="https://github.com/auvents-brave/BoatTools/releases/tag/lab">all assets →</a>
+    </p>
+  </section>
+
+  <!-- Library pill -->
+  <section class="pill">
+    <h2><span class="mono">BoatToolsKit</span> — Swift library</h2>
+    <p class="sub">For developers</p>
+    <p class="lead">The multiplatform engine behind the CLI: strict-concurrency (Swift 6) Sendable models, NMEA / Signal K / Victron clients, a normalising metric store, and AIS decoding with country derivation — ready to embed in your own app.</p>
+    <div class="btns">
+      <a class="btn btn-cyan" href="https://github.com/auvents-brave/BoatTools">View on GitHub</a>
+      <a class="btn btn-cyan" href="https://auvents-brave.github.io/BoatTools/docc/documentation/boattoolskit/">API documentation</a>
+    </div>
+  </section>
+
+  <footer>
+    <p>MIT-licensed · Built with Swift 6.3 · <a href="https://github.com/auvents-brave/BoatTools">auvents-brave/BoatTools</a></p>
+  </footer>
+
+</div>
+</body>
+</html>
