@@ -1088,9 +1088,11 @@ internal enum NMEA2000Decoder {
         case 127250: return heading(data)
         case 127251: return rateOfTurn(data)
         case 127257: return attitude(data)
+        case 127258: return magneticVariation(data)
         case 127488: return engineRapid(data)
         case 127489: return engineDynamic(data)
         case 127505: return fluidLevel(data)
+        case 127506: return dcDetailedStatus(data)
         case 127508: return batteryStatus(data)
         case 128776: return windlassControl(data)
         case 128777: return windlassOperating(data)
@@ -1362,6 +1364,34 @@ internal enum NMEA2000Decoder {
         if let t = u16(d, 5), !na(t) {
             out.append(.init(name: "battery.\(inst).temperature",
                              value: Double(t) * 0.01 - 273.15, unit: "°C"))
+        }
+        return out.isEmpty ? nil : out
+    }
+
+    // 127258 — Magnetic Variation
+    //   byte 0: SID, byte 1: source, bytes 2-3: age of service
+    //   bytes 4-5: Variation (int16, 1e-4 rad per LSB) — positive = East
+    private static func magneticVariation(_ d: [UInt8]) -> [BoatMetric]? {
+        guard let varia = i16(d, 4), !na(varia) else { return nil }
+        return [.init(name: "magneticVariation", value: Double(varia) * 1e-4 * 180 / .pi, unit: "°")]
+    }
+
+    // 127506 — DC Detailed Status
+    //   byte 0: SID, byte 1: DC instance, byte 2: DC type
+    //   byte 3: State of Charge (%), byte 4: State of Health (%)
+    //   bytes 5-6: Time Remaining (uint16, minutes)
+    //   bytes 7-8: Ripple Voltage (uint16, 0.001 V)
+    private static func dcDetailedStatus(_ d: [UInt8]) -> [BoatMetric]? {
+        guard let inst = u8(d, 1) else { return nil }
+        var out: [BoatMetric] = []
+        if let soc = u8(d, 3), soc != 0xFF {
+            out.append(.init(name: "battery.\(inst).stateOfCharge", value: Double(soc), unit: "%"))
+        }
+        if let soh = u8(d, 4), soh != 0xFF {
+            out.append(.init(name: "battery.\(inst).stateOfHealth", value: Double(soh), unit: "%"))
+        }
+        if let tr = u16(d, 5), !na(tr) {
+            out.append(.init(name: "battery.\(inst).timeRemaining", value: Double(tr), unit: "min"))
         }
         return out.isEmpty ? nil : out
     }
@@ -1859,6 +1889,12 @@ internal enum NMEA2000Decoder {
         if let dist = u32(d, 1), !na(dist) {
             out.append(.init(name: "navigation.distanceToWaypoint",
                              value: Double(dist) * 0.01 / 1852.0, unit: "NM"))
+        }
+        // ETA at the destination waypoint: time (0.0001 s of day) + date (days
+        // since 1970), combined into a UNIX timestamp.
+        if let etaTime = u32(d, 7), !na(etaTime), let etaDate = u16(d, 11), !na(etaDate) {
+            let epoch = Double(etaDate) * 86_400.0 + Double(etaTime) * 0.0001
+            out.append(.init(name: "navigation.eta", value: epoch, unit: "s"))
         }
         if let b = u16(d, 13), !na(b) {
             out.append(.init(name: "navigation.bearingOriginToDest",

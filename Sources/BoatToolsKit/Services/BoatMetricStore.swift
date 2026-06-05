@@ -940,6 +940,43 @@ public final class BoatMetricStore {
         }
     }
 
+    /// Pre-fills a metric's curve history with synthetic past samples, so graphs
+    /// are populated the moment a session starts — useful for a simulator that
+    /// begins part-way through a passage. Any existing history for the metric is
+    /// replaced; the live feed then continues appending after the seeded tail.
+    ///
+    /// Samples are sorted oldest-first and fed through the same tiered buffers as
+    /// live data, so they must be spaced at least the tier's sample interval apart
+    /// (5 s for wind/SOG/COG curves, 30 min for pressure) to land as distinct
+    /// points.
+    ///
+    /// - Parameters:
+    ///   - name: The metric whose history to seed (e.g. `TWS`, `pressure.atmospheric`).
+    ///   - samples: The past `(timestamp, value)` pairs to seed.
+    public func seedHistory(name: String, samples: [(at: Date, value: Double)]) {
+        resetHistory(name: name)
+        for sample in samples.sorted(by: { $0.at < $1.at }) {
+            feedHistory(name: name, value: sample.value, at: sample.at)
+        }
+    }
+
+    /// Empties the history buffer backing a metric, so seeding starts from clean
+    /// axes without doubling up on a reconnect.
+    private func resetHistory(name: String) {
+        switch name {
+        case "TWS":                  windTWS = TieredHistory(isAngle: false)
+        case "TWD":                  windTWD = TieredHistory(isAngle: true)
+        case "AWS":                  windAWS = TieredHistory(isAngle: false)
+        case "AWA":                  windAWA = TieredHistory(isAngle: true)
+        case "SOG":                  sog = TieredHistory(isAngle: false)
+        case "COG":                  cog = TieredHistory(isAngle: true)
+        case "depth":                depthHist = TieredHistory(isAngle: false)
+        case "temperature.water":    waterTemp = TieredHistory(isAngle: false)
+        case "pressure.atmospheric": pressure = PressureHistory()
+        default:                     break
+        }
+    }
+
     private func mergeAIS(_ incoming: AISTarget, at now: Date) {
         // Reject implausible decodes: MMSI is a 9-digit identifier, so anything
         // outside 1…999 999 999 is a corrupt/misaligned message.
