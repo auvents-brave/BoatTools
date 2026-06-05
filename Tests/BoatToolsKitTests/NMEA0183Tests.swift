@@ -48,4 +48,26 @@ struct NMEA0183Tests {
         let metrics = try #require(NMEA0183Parser.decode(fields))
         #expect(!metrics.isEmpty)
     }
+
+    @Test func `MTA decodes air temperature`() throws {
+        guard case let .nmea0183(_, _, _, fields)? = NMEA0183Parser.parse("$WIMTA,21.5,C")
+        else { Issue.record("parse failed"); return }
+        let byName = Dictionary(uniqueKeysWithValues: try #require(NMEA0183Parser.decode(fields)).map { ($0.name, $0.value) })
+        #expect(byName["temperature.air"] == 21.5)
+    }
+
+    @Test func `MMB decodes barometric pressure (bars preferred)`() throws {
+        guard case let .nmea0183(_, _, _, fields)? = NMEA0183Parser.parse("$WIMMB,29.92,I,1.0132,B")
+        else { Issue.record("parse failed"); return }
+        let p = try #require(NMEA0183Parser.decode(fields)?.first { $0.name == "pressure.atmospheric" }?.value)
+        #expect(abs(p - 1013.2) < 1e-6)
+    }
+
+    @Test func `VWT decodes true wind angle and speed`() throws {
+        guard case let .nmea0183(_, _, _, fields)? = NMEA0183Parser.parse("$WIVWT,45,L,10.5,N,5.4,M,19.4,K")
+        else { Issue.record("parse failed"); return }
+        let byName = Dictionary(uniqueKeysWithValues: try #require(NMEA0183Parser.decode(fields)).map { ($0.name, $0.value) })
+        #expect(byName["TWA"] == -45)
+        #expect(byName["TWS"] == 10.5)
+    }
 }

@@ -57,6 +57,9 @@ public struct AISTarget: Sendable, Equatable {
     public let navAidType: NavigationalAidType?
     /// Altitude in metres — populated by SAR aircraft reports (msg type 9).
     public let altitude: Double?
+    /// Free text carried by the message — the safety text of an addressed (12) or
+    /// broadcast (14) safety message, when present.
+    public let text: String?
 
     /// `true` when the report describes own vessel — a VDO sentence, or a VDM
     /// echoing own MMSI. Set by the transport after decoding; defaults to `false`.
@@ -80,7 +83,8 @@ public struct AISTarget: Sendable, Equatable {
         shipType: ShipType? = nil, imoNumber: Int? = nil,
         destination: String? = nil, draught: Double? = nil,
         navAidType: NavigationalAidType? = nil,
-        altitude: Double? = nil
+        altitude: Double? = nil,
+        text: String? = nil
     ) {
         self.mmsi              = mmsi
         self.messageType       = messageType
@@ -103,6 +107,7 @@ public struct AISTarget: Sendable, Equatable {
         self.draught           = draught
         self.navAidType        = navAidType
         self.altitude          = altitude
+        self.text              = text
     }
 }
 
@@ -226,12 +231,38 @@ internal enum AISDecoder {
             return decodeType21(buf: buf, channel: channel)
         case .classAStaticData:
             return decodeType24(buf: buf, channel: channel)
+        case .addressedSafetyMessage:
+            return decodeSafetyText(buf: buf, channel: channel,
+                                    msgType: messageType, textStart: 72)
+        case .safetyBroadcastMessage:
+            return decodeSafetyText(buf: buf, channel: channel,
+                                    msgType: messageType, textStart: 40)
         default:
             // We can still yield a minimal target with just MMSI from the header.
             guard buf.bitCount >= 38 else { return nil }
             let mmsi = buf.uint(8, 30)
             return AISTarget(mmsi: mmsi, messageType: messageType, channel: channel)
         }
+    }
+
+    /// Decodes a safety message (addressed type 12, broadcast type 14): the
+    /// source MMSI plus the 6-bit ASCII free text.
+    ///
+    /// - Parameter textStart: First text bit — 72 for type 12 (after the
+    ///   destination MMSI / retransmit / spare), 40 for type 14 (after the spare).
+    private static func decodeSafetyText(
+        buf: AISBitBuffer, channel: Character,
+        msgType: AisMessageType, textStart: Int
+    ) -> AISTarget? {
+        guard buf.bitCount >= 40 else { return nil }
+        let mmsi = buf.uint(8, 30)
+        let text = buf.bitCount > textStart
+            ? buf.text(textStart, buf.bitCount - textStart)
+            : ""
+        return AISTarget(
+            mmsi: mmsi, messageType: msgType, channel: channel,
+            text: text.isEmpty ? nil : text
+        )
     }
 
     /// For ``AisMessageType/binaryBroadcastMessage`` (type 8) carrying the IMO 289
@@ -244,10 +275,13 @@ internal enum AISDecoder {
         let buf = AISBitBuffer(payload, fillBits: fillBits)
         guard buf.bitCount >= 56,
               buf.uint(0, 6) == 8,           // type 8 Binary Broadcast
-              buf.uint(40, 10) == 1,         // DAC = 1 (international)
-              buf.uint(50, 6)  == 11         // FI = 11 (Meteorological/Hydrological)
+              buf.uint(40, 10) == 1          // DAC = 1 (international)
         else { return nil }
-        return decodeMeteoIFM11(buf: buf)
+        switch buf.uint(50, 6) {             // FI
+        case 11: return decodeMeteoIFM11(buf: buf)   // IMO 236
+        case 31: return decodeMeteoIFM31(buf: buf)   // IMO 289 (current)
+        default: return nil
+        }
     }
 
     // MARK: Type 1/2/3 — Class A position report
@@ -401,6 +435,58 @@ internal enum AISDecoder {
         let pressRaw = buf.uint(179, 9)
         if pressRaw != 511, pressRaw <= 402 {
             out.append(.init(name: "pressure.atmospheric", value: Double(pressRaw + 800), unit: "hPa"))
+        }
+
+        return out.isEmpty ? nil : out
+    }
+
+    // MARK: IFM 31 — Meteorological and Hydrological Data (IMO 289, current)
+    //
+    // Same fields as IFM 11 but with the wider position encoding (longitude 25
+    // bits, latitude 24 bits — every later field shifts by +2 bits) and the air
+    // pressure offset of 799 instead of 800.
+    private static func decodeMeteoIFM31(buf: AISBitBuffer) -> [BoatMetric]? {
+        guard buf.bitCount >= 191 else { return nil }
+        var out: [BoatMetric] = []
+
+        // Position — 1/1000 minute, sentinels 181°/91°.
+        let lonRaw = buf.int(56, 25)
+        let latRaw = buf.int(81, 24)
+        if lonRaw != 10_860_000 { out.append(.init(name: "lon", value: Double(lonRaw) / 60_000.0, unit: "°")) }
+        if latRaw != 5_460_000  { out.append(.init(name: "lat", value: Double(latRaw) / 60_000.0, unit: "°")) }
+
+        // Wind
+        let avgWind  = buf.uint(122, 7)
+        let gustWind = buf.uint(129, 7)
+        let windDir  = buf.uint(136, 9)
+        let gustDir  = buf.uint(145, 9)
+        if avgWind  < 127 { out.append(.init(name: "TWS",      value: Double(avgWind),  unit: "kn")) }
+        if gustWind < 127 { out.append(.init(name: "TWS.gust", value: Double(gustWind), unit: "kn")) }
+        if windDir  < 360 { out.append(.init(name: "TWD",      value: Double(windDir),  unit: "°")) }
+        if gustDir  < 360 { out.append(.init(name: "TWD.gust", value: Double(gustDir),  unit: "°")) }
+
+        // Temperature
+        let tempRaw = buf.int(154, 11)
+        if tempRaw > -601, tempRaw < 601 {
+            out.append(.init(name: "temperature.air", value: Double(tempRaw) * 0.1, unit: "°C"))
+        }
+
+        // Humidity
+        let humidity = buf.uint(165, 7)
+        if humidity <= 100 {
+            out.append(.init(name: "humidity", value: Double(humidity), unit: "%"))
+        }
+
+        // Dew point
+        let dewRaw = buf.int(172, 10)
+        if dewRaw > -201, dewRaw < 501 {
+            out.append(.init(name: "temperature.dewPoint", value: Double(dewRaw) * 0.1, unit: "°C"))
+        }
+
+        // Air pressure — offset 799; 0 = ≤799 hPa, 403 = N/A.
+        let pressRaw = buf.uint(182, 9)
+        if pressRaw > 0, pressRaw <= 402 {
+            out.append(.init(name: "pressure.atmospheric", value: Double(pressRaw + 799), unit: "hPa"))
         }
 
         return out.isEmpty ? nil : out

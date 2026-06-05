@@ -96,6 +96,9 @@ public enum NMEA0183Parser {
         case "ZDA":             return decodeZDA(fields)
         case "TNL":             return decodeTNL(fields)
         case "MDA":             return decodeMDA(fields)
+        case "MTA":             return decodeMTA(fields)
+        case "MMB":             return decodeMMB(fields)
+        case "VWT":             return decodeVWT(fields)
         case "XTE":             return decodeXTE(fields)
         case "APA", "APB":      return decodeAPB(fields)   // APA = APB without the last 4 fields
         case "RMB":             return decodeRMB(fields)
@@ -367,6 +370,37 @@ public enum NMEA0183Parser {
         }
         if let s = Double(f[3]) { out.append(.init(name: "AWS", value: s, unit: "kn")) }
         return out.isEmpty ? nil : out
+    }
+
+    // VWT — True wind speed and angle (relative to the bow)
+    private static func decodeVWT(_ f: [String]) -> [BoatMetric]? {
+        guard f.count >= 9 else { return nil }
+        var out: [BoatMetric] = []
+        if let a = Double(f[1]) {
+            let signed = f[2] == "L" ? -a : a
+            out.append(.init(name: "TWA", value: signed, unit: "°"))
+        }
+        if let s = Double(f[3]) { out.append(.init(name: "TWS", value: s, unit: "kn")) }
+        return out.isEmpty ? nil : out
+    }
+
+    // MTA — Air temperature
+    private static func decodeMTA(_ f: [String]) -> [BoatMetric]? {
+        guard f.count >= 3, let t = Double(f[1]) else { return nil }
+        let celsius = f[2] == "F" ? (t - 32) * 5 / 9 : t
+        return [.init(name: "temperature.air", value: celsius, unit: "°C")]
+    }
+
+    // MMB — Barometer (inches of mercury and/or bars)
+    private static func decodeMMB(_ f: [String]) -> [BoatMetric]? {
+        guard f.count >= 5 else { return nil }
+        if let bars = Double(f[3]) {
+            return [.init(name: "pressure.atmospheric", value: bars * 1000, unit: "hPa")]
+        }
+        if let inHg = Double(f[1]) {
+            return [.init(name: "pressure.atmospheric", value: inHg * 33.8639, unit: "hPa")]
+        }
+        return nil
     }
 
     // ZDA — Time and date

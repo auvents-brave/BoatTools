@@ -40,6 +40,7 @@ Inventory of the NMEA 0183 sentences, NMEA 2000 PGNs, and Signal K paths recogni
 | `MWV` | Wind Speed and Angle | `AWA`/`TWA`, `AWS`/`TWS` (true or apparent according to the reference flag) |
 | `MWD` | Wind Direction and Speed | `TWD`, `TWS` |
 | `VWR` | Relative Wind Speed and Angle | `AWA` (signed by L/R), `AWS` |
+| `VWT` | True Wind Speed and Angle | `TWA` (signed by L/R), `TWS` |
 
 ### Water
 
@@ -57,6 +58,8 @@ Inventory of the NMEA 0183 sentences, NMEA 2000 PGNs, and Signal K paths recogni
 | Sentence | Description | Metrics emitted |
 |---|---|---|
 | `MDA` | Meteorological Composite | `pressure.atmospheric`, `temperature.air`, `temperature.water`, `humidity`, `temperature.dewPoint`, `TWD`, `TWS` |
+| `MTA` | Air Temperature | `temperature.air` (Fahrenheit values are converted to Celsius) |
+| `MMB` | Barometer | `pressure.atmospheric` (bars preferred, else inches Hg) |
 
 ### Autopilot / routing
 
@@ -110,7 +113,7 @@ Multi-message sentences are reassembled before decoding.
 | `VDM` | AIS VHF Data-Link Message | AIS target |
 | `VDO` | AIS VHF Data-Link Own-Vessel Report | AIS target |
 
-Supported AIS message types: **1/2/3** (Class A Position), **4** (Base Station Report), **5** (Class A Static and Voyage Data), **8** (Binary Broadcast — also extracts the IMO 289 IFM 11 meteorological payload as metrics), **9** (SAR Aircraft, adds `altitude`), **18** (Class B Position), **19** (Class B Extended Position), **21** (Aid to Navigation), **24A/24B** (Class B Static).
+Supported AIS message types: **1/2/3** (Class A Position), **4** (Base Station Report), **5** (Class A Static and Voyage Data), **8** (Binary Broadcast — also extracts the IMO 236 **IFM 11** and IMO 289 **IFM 31** meteorological/hydrological payloads as metrics), **9** (SAR Aircraft, adds `altitude`), **12/14** (Addressed / Broadcast Safety Messages — the free `text` is decoded), **18** (Class B Position), **19** (Class B Extended Position), **21** (Aid to Navigation), **24A/24B** (Class B Static).
 
 Position reports are automatically enriched with the most recent static data (name, callsign, ship type, IMO, destination, draught) seen for the same MMSI.
 
@@ -338,14 +341,14 @@ Reverse view: for every canonical metric emitted by BoatTools, the protocols tha
 | `HDG.deviation` / `magneticVariation` | — | `127250` | — |
 | `ROT` | `ROT`, AIS type 1/2/3 | `127251`, AIS PGN 129038 | `navigation.rateOfTurn` |
 | `AWA` / `AWS` | `MWV`, `VWR` | `130306` | `environment.wind.angleApparent`, `environment.wind.speedApparent` |
-| `TWA` / `TWS` / `TWD` | `MWV`, `MWD`, `MDA`, AIS meteo IFM 11 | `130306`, `130323` | `environment.wind.{angleTrueWater,speedTrue,directionTrue}` |
-| `TWS.gust` / `TWD.gust` | AIS meteo IFM 11, `MDA` (gust not in MDA spec — placeholder) | `130323` | — |
+| `TWA` / `TWS` / `TWD` | `MWV`, `MWD`, `MDA`, `VWT`, AIS meteo IFM 11/31 | `130306`, `130323` | `environment.wind.{angleTrueWater,speedTrue,directionTrue}` |
+| `TWS.gust` / `TWD.gust` | AIS meteo IFM 11/31, `MDA` (gust not in MDA spec — placeholder) | `130323` | — |
 | `depth` | `DPT`, `DBT` | `128267` | `environment.depth.{belowKeel,belowSurface,belowTransducer}` |
 | `temperature.water` | `MTW`, `MDA` | `130310`, `130311`, `130312` | `environment.water.temperature` |
-| `temperature.air` | `MDA`, AIS meteo IFM 11 | `130310`, `130311`, `130312`, `130323` | `environment.outside.temperature` |
-| `temperature.dewPoint` | `MDA`, AIS meteo IFM 11 | `130311` | `environment.outside.dewPointTemperature` |
-| `humidity` | `MDA`, AIS meteo IFM 11 | `130311` | `environment.outside.humidity` |
-| `pressure.atmospheric` | `MDA`, AIS meteo IFM 11 | `130310`, `130311`, `130314`, `130323` | `environment.outside.pressure` |
+| `temperature.air` | `MDA`, `MTA`, AIS meteo IFM 11/31 | `130310`, `130311`, `130312`, `130323` | `environment.outside.temperature` |
+| `temperature.dewPoint` | `MDA`, AIS meteo IFM 11/31 | `130311` | `environment.outside.dewPointTemperature` |
+| `humidity` | `MDA`, AIS meteo IFM 11/31 | `130311` | `environment.outside.humidity` |
+| `pressure.atmospheric` | `MDA`, `MMB`, AIS meteo IFM 11 | `130310`, `130311`, `130314`, `130323` | `environment.outside.pressure` |
 | `gps.fix` | `GSA` | `129539` | — |
 | `gps.satellites` | `GGA`, `GSA`, `GNS` | `129029` | `navigation.gnss.satellites` |
 | `gps.satellites.inView` | `GSV` | `129540` | `navigation.gnss.satellitesInView` |
