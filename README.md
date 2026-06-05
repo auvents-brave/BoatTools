@@ -14,7 +14,7 @@ Pre-built binaries are attached to every [release](https://github.com/auvents-br
 - **macOS** (Apple Silicon + Intel) — [`boattools-macos-universal.pkg`](https://github.com/auvents-brave/BoatTools/releases/latest/download/boattools-macos-universal.pkg): installs `boattools` into `/usr/local/bin`. BoatTools is signed and **notarised by Apple**, so it installs without any Gatekeeper warning. 
 - **Linux** (x86_64) — [`boattools-linux-x86_64.tar.gz`](https://github.com/auvents-brave/BoatTools/releases/latest/download/boattools-linux-x86_64.tar.gz). `discover` on Linux needs the Avahi compatibility library (`libavahi-compat-libdnssd-dev`).
 
-## Swift 6.3 strict concurrency highlights
+## Swift 6 strict concurrency highlights
 
 - All public types are **Sendable** (`BoatMetric`, `NMEAFrame`, `JSONValue`, configs, errors).
 - Signal K snapshots are typed `JSONValue` (a `Sendable` enum) rather than `[String: Any]`.
@@ -40,16 +40,19 @@ frames to the clients and the metric store and let them dispatch.
 - `Country` — MID-derived flag for an AIS MMSI.
 - `JSONValue` — `Sendable` JSON tree returned by Signal K REST snapshots.
 - `FileFrame` — frame + optional embedded timestamp, emitted by file replay.
+- `ReplayPacing` — how a recorded log is replayed: honour the file's own timestamps, or emit at a fixed number of lines per second.
 - `BoatCloudError` — transport / parsing failure.
 - NMEA enums: `TalkerId`, `MessageId`, `AisMessageType`, `NavigationStatus`, `ManeuverIndicator`, `ShipType`, `NavigationalAidType`.
 
 **Metric store** — observable aggregation of resolved metrics. See [`METRIC_STORE.md`](METRIC_STORE.md).
-- `BoatMetricStore` — `@Observable @MainActor` store; feed it `NMEAFrame` or `BoatMetric` values via `feed(_:)`, `feedSignalK(_:)`, `feedMetric(_:)`, `feedMetrics(_:)`, or the async-stream piping helpers `pipe(_:)` / `pipeSignalK(_:)` / `pipeMetrics(_:)`.
+- `BoatMetricStore` — `@Observable @MainActor` store; feed it `NMEAFrame` or `BoatMetric` values via `feed(_:)`, `feedSignalK(_:)`, `feedMetric(_:)`, `feedMetrics(_:)`, or the async-stream piping helpers `pipe(_:)` / `pipeSignalK(_:)` / `pipeMetrics(_:)`. AIS exposes `aisTargets`, `ownShip` (own MMSI excluded from targets) and `isStale(_:)`. `labels` / `setLabels(_:)` carry human display names for metric prefixes (e.g. `battery.0` → "Lynx 24"). `clear()` / `clearAIS()` reset published state when switching source or disconnecting — `clear()` also resets the pending one-second window so stale frames cannot resurface on the next tick.
+- `ConnectionMultiplexer` — `@Observable @MainActor`; feeds several live sources into one `BoatMetricStore` at once for a "listen to everything" mode, owning one task per source, tracking each source's liveness (`SourceState`: `.connecting` / `.ended` / `.failed`) and tearing them all down together.
 - `TimedSample`, `RingBuffer<T>`, `TieredHistory`, `PressureHistory` — history primitives backing the store's `windTWS`, `sog`, `pressure`, etc.
 
 **Clients** — talk to live data sources.
-- `SignalKClient` — REST snapshots (`snapshot(...)`), WebSocket live stream (`liveStream(...)`), TCP / UDP delta streams (`frameStream(...)`), token-based auth (`login(...)`).
-- `VictronVRMClient` — VRM Portal HTTP API: `installations()`, `diagnostics(siteId:)`, `metrics(siteId:)`.
+- `SignalKClient` — REST snapshots (`snapshot(...)`), WebSocket live stream (`liveStream(...)`), and raw NDJSON delta streams over TCP / UDP (`tcpStream(...)`, `udpStream(...)`), with token- or password-based auth (`login(...)`).
+- `VictronVRMClient` — VRM Portal HTTP API: `installations()`, `diagnostics(siteId:)`, and `metrics(siteId:)` mapped onto canonical metric names nested under per-device prefixes (`battery.0.`, `solar.1.`, `tank.`, `vebus.`, `system.`). `labels(...)` fetches the installation's custom device names; `frameStream(...)` polls continuously, or takes a single snapshot when the interval is zero. `DiagnosticRecord` exposes `device`, `instance` and a `unit` stripped of its printf format.
+- Each client also offers NIO-free `static` stream factories (`SignalKClient.liveStream(config:)` / `.tcpStream(...)` / `.udpStream(...)`, `VictronVRMClient.frameStream(accessToken:siteId:...)`) that own their event loop internally, so callers can pipe them straight into the store with no SwiftNIO of their own.
 
 **Transport** — NMEA over TCP / UDP / file.
 - `NMEATransport` — opens a TCP or UDP socket, demultiplexes lines, runs the multipart / fast-packet / GSV assemblers, emits `NMEAFrame` values.
@@ -59,6 +62,7 @@ frames to the clients and the metric store and let them dispatch.
 **Device sensors** — Apple-only fallback.
 - `DeviceSensors` — CoreLocation + CoreMotion bridge, emitting `BoatMetric` for `lat`, `lon`, `SOG`, `COG`, `HDG.*`, `pressure.atmospheric`.
 - `DeviceSensorsConfig` — sensor-selection and accuracy knobs.
+- `DeviceFallback` (with `DeviceFallback.Config`) — watches the store and starts the relevant device sensor only while a given metric (position, heading, pressure) is missing or stale, automatically standing down when network data returns.
 
 **Parsing** — most parsers are internal. The one exposed type:
 - `NMEA0183Parser` — stateless sentence parser used by the CLI to filter decoded vs unknown sentence types. NMEA 2000, AIS, SeaSmart, Canboat, iKonvert and YD RAW decoders are reached indirectly through `NMEATransport`. Full decoder coverage in [`DECODERS.md`](DECODERS.md).

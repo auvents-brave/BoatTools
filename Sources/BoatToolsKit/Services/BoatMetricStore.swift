@@ -397,7 +397,8 @@ private enum PriorityResolver {
         case .nmea2000(pgn: 129026):        return 10   // COG & SOG Rapid Update
         case .nmea0183(_, type: "VTG"):     return 20
         case .nmea0183(_, type: "RMC"):     return 30
-        case .signalK:                      return 40
+        case .nmea0183(_, type: "VBW"):     return 40   // longitudinal ground speed only (SOG; no COG)
+        case .signalK:                      return 50
         default:                            return 100
         }
     }
@@ -405,8 +406,9 @@ private enum PriorityResolver {
     private static func stwRank(_ s: SourceKind) -> Int {
         switch s {
         case .nmea2000(pgn: 128259):        return 10   // Speed
-        case .nmea0183(_, type: "VHW"):     return 20
-        case .signalK:                      return 30
+        case .nmea0183(_, type: "VHW"):     return 20   // dedicated water-speed sentence
+        case .nmea0183(_, type: "VBW"):     return 30   // longitudinal water speed
+        case .signalK:                      return 40
         default:                            return 100
         }
     }
@@ -562,11 +564,31 @@ public final class BoatMetricStore {
     /// All resolved numeric metrics, keyed by canonical name (e.g. `"SOG"`, `"lat"`).
     public private(set) var metrics: [String: BoatMetric] = [:]
 
-    /// AIS targets keyed by MMSI.
+    /// AIS targets keyed by MMSI — **other** vessels only.
     ///
-    /// Targets not updated for 10 minutes are considered stale (check with
-    /// ``isStale(_:)``); targets not updated for 30 minutes are removed.
+    /// Own vessel (a VDO report, or a VDM echoing own MMSI) is excluded and kept
+    /// in ``ownShip`` instead. Targets not updated for 10 minutes are considered
+    /// stale (check with ``isStale(_:)``); targets not updated for 30 minutes are
+    /// removed.
     public private(set) var aisTargets: [Int: AISTarget] = [:]
+
+    /// Optional human display names for metric prefixes (e.g. `"battery.0"` →
+    /// `"Lynx 24"`), supplied by sources that carry custom device names such as
+    /// Victron VRM. Consumers may use these to label instruments.
+    public private(set) var labels: [String: String] = [:]
+
+    /// Merges display names into ``labels`` (existing keys are overwritten).
+    public func setLabels(_ newLabels: [String: String]) {
+        for (key, name) in newLabels { labels[key] = name }
+    }
+
+    /// Own vessel's latest AIS report, learned from VDO sentences (or a VDM that
+    /// echoes own MMSI). `nil` until own transponder is heard.
+    public private(set) var ownShip: AISTarget?
+
+    /// Own vessel's MMSI, once known, so VDM echoes of ourselves are excluded
+    /// from ``aisTargets``.
+    private var ownMMSI: Int?
 
     /// Satellite lists keyed by constellation name.
     ///
@@ -642,6 +664,30 @@ public final class BoatMetricStore {
     public func stop() {
         timerTask?.cancel()
         timerTask = nil
+    }
+
+    /// Clears all published state — metrics and AIS targets (including own ship)
+    /// — so values from a previous source don't linger when switching, hard-
+    /// reconnecting or disconnecting.
+    ///
+    /// The pending 1-second window is reset too: without this, frames already
+    /// collected but not yet flushed would reappear on the next tick, so values
+    /// would briefly come back after a disconnect.
+    public func clear() {
+        collector.reset()
+        metrics.removeAll()
+        headingDerivedFromCOG = false
+        clearAIS()
+    }
+
+    /// Clears the AIS state only — every target, the staleness history and the
+    /// own-ship record. Use when switching source so another feed's vessels don't
+    /// linger, without disturbing the current metrics.
+    public func clearAIS() {
+        aisTargets.removeAll()
+        aisLastSeen.removeAll()
+        ownShip = nil
+        ownMMSI = nil
     }
 
     // MARK: Feeding data
@@ -791,6 +837,15 @@ public final class BoatMetricStore {
         pruneAISTargets(now: now)
     }
 
+    /// Whether `metrics["HDG.true"]` currently holds a COG-derived fallback
+    /// heading (used as a last resort when no NMEA/NMEA 2000 heading and no
+    /// device compass are available).
+    private var headingDerivedFromCOG = false
+
+    /// Whether `metrics["magneticVariation"]` currently holds a value we derived
+    /// from the true/magnetic heading pair rather than a reported variation.
+    private var variationDerived = false
+
     private func flush(at now: Date) {
         let (newMetrics, newAIS, newGSV) = (
             collector.candidates.values.map(\.metric),
@@ -800,10 +855,59 @@ public final class BoatMetricStore {
         collector.reset()
         currentSource = .unknown
 
+        // Drop the previous flush's COG-derived heading so it can never mask a
+        // real heading source resolved this flush.
+        if headingDerivedFromCOG {
+            metrics["HDG.true"] = nil
+            headingDerivedFromCOG = false
+        }
+
+        // Drop the previous flush's derived variation so a reported one can take
+        // over, and so the derived value tracks changing headings.
+        if variationDerived {
+            metrics["magneticVariation"] = nil
+            variationDerived = false
+        }
+
         // Merge metrics and feed histories.
         for m in newMetrics {
             metrics[m.name] = m
             feedHistory(name: m.name, value: m.value, at: now)
+        }
+
+        // Last-resort heading: when neither a NMEA/NMEA 2000 heading nor the
+        // device compass provides HDG, fall back to COG (course over ground) so
+        // consumers always have a heading. It is refreshed on every flush and is
+        // automatically superseded as soon as a real heading source appears.
+        if metrics["HDG.true"] == nil,
+           metrics["HDG.magnetic"] == nil,
+           let cog = metrics["COG"], cog.value >= 0 {
+            metrics["HDG.true"] = BoatMetric(
+                name: "HDG.true", value: cog.value, unit: cog.unit, timestamp: cog.timestamp
+            )
+            headingDerivedFromCOG = true
+        }
+
+        // Derive the magnetic variation whenever both true and magnetic heading
+        // are known but no variation was reported — regardless of source (device
+        // compass, NMEA 0183, NMEA 2000, Signal K…). Convention: positive = East
+        // (true north east of magnetic north). A reported `magneticVariation`
+        // always wins, since it is left untouched here.
+        if metrics["magneticVariation"] == nil,
+           !headingDerivedFromCOG,
+           let trueHeading = metrics["HDG.true"],
+           let magneticHeading = metrics["HDG.magnetic"] {
+            var variation = trueHeading.value - magneticHeading.value
+            if variation > 180 {
+                variation -= 360
+            } else if variation < -180 {
+                variation += 360
+            }
+            metrics["magneticVariation"] = BoatMetric(
+                name: "magneticVariation", value: variation, unit: "°",
+                timestamp: max(trueHeading.timestamp, magneticHeading.timestamp)
+            )
+            variationDerived = true
         }
 
         // Merge AIS targets (preserve static fields from older reports).
@@ -837,6 +941,20 @@ public final class BoatMetricStore {
     }
 
     private func mergeAIS(_ incoming: AISTarget, at now: Date) {
+        // Reject implausible decodes: MMSI is a 9-digit identifier, so anything
+        // outside 1…999 999 999 is a corrupt/misaligned message.
+        guard (1...999_999_999).contains(incoming.mmsi) else { return }
+
+        // Own vessel (VDO, or a VDM echoing our own MMSI) is not an "other
+        // vessel": keep it in `ownShip` and out of `aisTargets`.
+        if incoming.isOwnShip { ownMMSI = incoming.mmsi }
+        if let own = ownMMSI, incoming.mmsi == own {
+            ownShip = incoming
+            aisTargets.removeValue(forKey: incoming.mmsi)  // drop any earlier add
+            aisLastSeen.removeValue(forKey: incoming.mmsi)
+            return
+        }
+
         aisLastSeen[incoming.mmsi] = now
 
         guard let existing = aisTargets[incoming.mmsi] else {

@@ -45,9 +45,10 @@ Inventory of the NMEA 0183 sentences, NMEA 2000 PGNs, and Signal K paths recogni
 
 | Sentence | Description | Metrics emitted |
 |---|---|---|
-| `DPT` | Depth | `depth` |
-| `DBT` | Depth Below Transducer | `depth` |
-| `VHW` | Water Speed and Heading | `STW` |
+| `DPT` | Depth | `depth` (metres, relative to the transducer) |
+| `DBT` | Depth Below Transducer | `depth` (metres field; feet are converted when the metres field is absent) |
+| `VHW` | Water Speed and Heading | `HDG.true`, `HDG.magnetic`, `STW` |
+| `VBW` | Dual Ground/Water Speed | `STW` (longitudinal water), `SOG` (longitudinal ground), `speed.water.transverse`, `speed.ground.transverse` — each pair gated on its A/V status flag. Longitudinal components feed the canonical `STW`/`SOG` (resolved against VHW/VTG/RMC by priority); the transverse components (leeway) are unique to VBW. |
 | `MTW` | Water Temperature | `temperature.water` (Fahrenheit values are converted to Celsius) |
 | `VLW` | Distance Through Water | `log.total`, `log.trip` |
 
@@ -329,10 +330,11 @@ Reverse view: for every canonical metric emitted by BoatTools, the protocols tha
 |---|---|---|---|
 | `lat` / `lon` | `RMC`, `GLL`, `GGA`, `GNS`, AIS types 1/2/3/4/5/9/18/19/21, `$PTNL,GGK` | `129025`, `129029`, AIS PGN 129038/039/040/041/793 | `navigation.position` |
 | `altitude` | `GGA`, `GNS`, `$PTNL,GGK`, AIS type 9 (aircraft) | `129029`, AIS PGN | `navigation.position`, `navigation.gnss.antennaAltitude` |
-| `SOG` | `RMC`, `VTG`, AIS position reports | `129026`, AIS PGN 129038/039/040 | `navigation.speedOverGround` |
-| `STW` | `VHW` | `128259` | `navigation.speedThroughWater` |
+| `SOG` | `RMC`, `VTG`, `VBW` (longitudinal ground), AIS position reports | `129026`, AIS PGN 129038/039/040 | `navigation.speedOverGround` |
+| `STW` | `VHW`, `VBW` (longitudinal water) | `128259` | `navigation.speedThroughWater` |
+| `speed.water.transverse` / `speed.ground.transverse` | `VBW` (leeway / set) | — | — |
 | `COG` | `RMC`, `VTG`, AIS position reports | `129026`, AIS PGN | `navigation.courseOverGroundTrue` |
-| `HDG` / `HDG.true` / `HDG.magnetic` | `HDT`, `HDG`, `HDM`, `$PTNL,VHD` | `127250` | `navigation.headingTrue`, `navigation.headingMagnetic` |
+| `HDG` / `HDG.true` / `HDG.magnetic` | `HDT`, `HDG`, `HDM`, `VHW`, `$PTNL,VHD` | `127250` | `navigation.headingTrue`, `navigation.headingMagnetic` |
 | `HDG.deviation` / `magneticVariation` | — | `127250` | — |
 | `ROT` | `ROT`, AIS type 1/2/3 | `127251`, AIS PGN 129038 | `navigation.rateOfTurn` |
 | `AWA` / `AWS` | `MWV`, `VWR` | `130306` | `environment.wind.angleApparent`, `environment.wind.speedApparent` |

@@ -46,7 +46,7 @@ public enum NMEA0183Parser {
     /// Useful for distinguishing "recognised but no decoder implemented yet" from a fully
     /// supported sentence in user-facing displays.
     public static let decodedTypes: Set<String> = [
-        "RMC", "MWV", "DPT", "DBT", "VHW",
+        "RMC", "MWV", "DPT", "DBT", "VBW", "VHW",
         "HDT", "HDG", "HDM", "MWD", "VTG",
         "GLL", "XDR",
         "GGA", "GSA", "GNS", "GST", "GSV",
@@ -74,7 +74,9 @@ public enum NMEA0183Parser {
         switch type {
         case "RMC":             return decodeRMC(fields)
         case "MWV":             return decodeMWV(fields)
-        case "DPT", "DBT":      return decodeDepth(fields)
+        case "DPT":             return decodeDPT(fields)
+        case "DBT":             return decodeDBT(fields)
+        case "VBW":             return decodeVBW(fields)
         case "VHW":             return decodeVHW(fields)
         case "HDT", "HDG", "HDM": return decodeHeading(fields, type: type)
         case "MWD":             return decodeMWD(fields)
@@ -135,14 +137,60 @@ public enum NMEA0183Parser {
         return out.isEmpty ? nil : out
     }
 
-    private static func decodeDepth(_ f: [String]) -> [BoatMetric]? {
+    // DPT — Depth of water relative to the transducer.
+    //   $--DPT,<metres>,<offset>,<maxRange>*cs
+    private static func decodeDPT(_ f: [String]) -> [BoatMetric]? {
         guard f.count >= 2, let d = Double(f[1]) else { return nil }
         return [.init(name: "depth", value: d, unit: "m")]
     }
 
+    // DBT — Depth below transducer, reported simultaneously in feet, metres and
+    // fathoms.
+    //   $--DBT,<feet>,f,<metres>,M,<fathoms>,F*cs
+    // The metres field (index 3) is authoritative; some talkers omit it, so fall
+    // back to converting the feet field.
+    private static func decodeDBT(_ f: [String]) -> [BoatMetric]? {
+        if f.count >= 4, let m = Double(f[3]) {
+            return [.init(name: "depth", value: m, unit: "m")]
+        }
+        if f.count >= 2, let feet = Double(f[1]) {
+            return [.init(name: "depth", value: feet * 0.3048, unit: "m")]
+        }
+        return nil
+    }
+
+    // VBW — Dual ground/water speed.
+    //   $--VBW,<longWater>,<transWater>,<statusWater A|V>,
+    //          <longGround>,<transGround>,<statusGround A|V>,…*cs
+    // Longitudinal components are positive forward; transverse components are
+    // positive to starboard. Each pair is gated on its own A/V status flag.
+    //
+    // The longitudinal components are the same physical quantities as `STW`
+    // (water) and `SOG` (ground), so they are emitted under those canonical
+    // names and resolved against VHW/VTG/RMC by the metric store's priority
+    // tables. The transverse components (leeway / sideways set) have no
+    // equivalent in any other sentence and keep their own names.
+    private static func decodeVBW(_ f: [String]) -> [BoatMetric]? {
+        var out: [BoatMetric] = []
+        if f.count >= 4, f[3].hasPrefix("A") {
+            if let l = Double(f[1]) { out.append(.init(name: "STW",                    value: l, unit: "kn")) }
+            if let t = Double(f[2]) { out.append(.init(name: "speed.water.transverse", value: t, unit: "kn")) }
+        }
+        if f.count >= 7, f[6].hasPrefix("A") {
+            if let l = Double(f[4]) { out.append(.init(name: "SOG",                     value: l, unit: "kn")) }
+            if let t = Double(f[5]) { out.append(.init(name: "speed.ground.transverse", value: t, unit: "kn")) }
+        }
+        return out.isEmpty ? nil : out
+    }
+
+    // VHW — Water speed and heading.
+    //   $--VHW,<headTrue>,T,<headMag>,M,<speedKn>,N,<speedKmh>,K*cs
     private static func decodeVHW(_ f: [String]) -> [BoatMetric]? {
-        guard f.count >= 6, let s = Double(f[5]) else { return nil }
-        return [.init(name: "STW", value: s, unit: "kn")]
+        var out: [BoatMetric] = []
+        if f.count >= 2, let ht = Double(f[1]) { out.append(.init(name: "HDG.true",     value: ht, unit: "°")) }
+        if f.count >= 4, let hm = Double(f[3]) { out.append(.init(name: "HDG.magnetic", value: hm, unit: "°")) }
+        if f.count >= 6, let s  = Double(f[5]) { out.append(.init(name: "STW",          value: s,  unit: "kn")) }
+        return out.isEmpty ? nil : out
     }
 
     private static func decodeHeading(_ f: [String], type: String) -> [BoatMetric]? {

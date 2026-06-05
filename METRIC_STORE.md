@@ -71,7 +71,8 @@ Tie-breaking within the same rank (same sentence type, different talkers) is han
 | 1 | PGN `129026` COG & SOG Rapid Update | Dedicated, high rate |
 | 2 | NMEA 0183 `VTG` | Dedicated sentence |
 | 3 | NMEA 0183 `RMC` | Combined with position, lower confidence |
-| 4 | Signal K `navigation.speedOverGround` / `courseOverGroundTrue` | |
+| 4 | NMEA 0183 `VBW` | Longitudinal ground speed only (`SOG`; carries no `COG`); ignores the transverse component |
+| 5 | Signal K `navigation.speedOverGround` / `courseOverGroundTrue` | |
 
 **Tie-break:** same talker priority as position.
 
@@ -82,8 +83,11 @@ Tie-breaking within the same rank (same sentence type, different talkers) is han
 | Rank | Source | Why |
 |------|--------|-----|
 | 1 | PGN `128259` Speed | Dedicated |
-| 2 | NMEA 0183 `VHW` | Dedicated |
-| 3 | Signal K `navigation.speedThroughWater` | |
+| 2 | NMEA 0183 `VHW` | Dedicated water-speed sentence |
+| 3 | NMEA 0183 `VBW` | Longitudinal water speed (dual ground/water sentence) |
+| 4 | Signal K `navigation.speedThroughWater` | |
+
+> `VBW` also emits `speed.water.transverse` and `speed.ground.transverse` (leeway / sideways set). These have no competing source, so they pass through at the default rank and never collide with `STW`/`SOG`.
 
 ---
 
@@ -96,6 +100,25 @@ Tie-breaking within the same rank (same sentence type, different talkers) is han
 | 3 | NMEA 0183 `HDG` | Magnetic + optional deviation/variation |
 | 4 | NMEA 0183 `HDM` | Magnetic only |
 | 5 | Signal K `navigation.headingTrue` / `headingMagnetic` | |
+
+**Last-resort fallback (COG):** when *no* heading source is available — no
+NMEA / NMEA 2000 heading **and** no device compass (the sensor is absent or
+denied) — the store derives `HDG.true` from **`COG`** (course over ground).
+This keeps a heading available for consumers (e.g. orienting the vessel marker)
+when under way. The derived value is refreshed on every flush and is
+automatically discarded the moment any real heading source appears, so it never
+masks a genuine `HDG.true` / `HDG.magnetic`. It is suppressed while `COG` is
+invalid (e.g. stationary), so no spurious heading is published.
+
+**Derived magnetic variation:** whenever both `HDG.true` and `HDG.magnetic` are
+known but **no** `magneticVariation` was reported, the store derives it as the
+signed difference `HDG.true − HDG.magnetic`, normalised to ±180° (positive =
+East = true north east of magnetic north). This is **source-agnostic** — it
+works for the device compass, NMEA 0183, NMEA 2000 and Signal K alike. A source
+that carries variation directly always wins: the reported value is never
+overwritten. Like the COG-derived heading, the derived variation is refreshed on
+every flush (so it tracks changing headings) and is dropped the moment a real
+variation appears.
 
 ---
 
@@ -212,7 +235,7 @@ The `metrics` dict holds **every** `BoatMetric` produced by the priority resolve
 | Category | Example keys |
 |---|---|
 | Position | `lat`, `lon`, `altitude` |
-| Speed / course | `SOG`, `COG`, `STW`, `ROT` |
+| Speed / course | `SOG`, `COG`, `STW`, `ROT`, `speed.water.transverse`, `speed.ground.transverse` |
 | Heading | `HDG.true`, `HDG.magnetic`, `magneticVariation` |
 | Wind | `TWS`, `TWD`, `AWS`, `AWA` |
 | Depth | `depth`, `depth.offset` |

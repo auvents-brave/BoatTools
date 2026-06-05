@@ -54,7 +54,11 @@ let package = Package(
     name: "BoatTools",
     platforms: [
         .macOS(.v14),
+        .macCatalyst(.v17),
         .iOS(.v17),
+        .tvOS(.v17),
+        .watchOS(.v11),
+        .visionOS(.v1),
     ],
     products: [
         .library(name: "BoatToolsKit", targets: ["BoatToolsKit"]),

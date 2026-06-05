@@ -58,6 +58,10 @@ public struct AISTarget: Sendable, Equatable {
     /// Altitude in metres — populated by SAR aircraft reports (msg type 9).
     public let altitude: Double?
 
+    /// `true` when the report describes own vessel — a VDO sentence, or a VDM
+    /// echoing own MMSI. Set by the transport after decoding; defaults to `false`.
+    public var isOwnShip: Bool = false
+
     /// Creates an AIS target from decoded message fields.
     ///
     /// Memberwise initialiser — see each property for the meaning of its argument.
@@ -405,7 +409,11 @@ internal enum AISDecoder {
     // MARK: Type 5 — Static and voyage data
 
     private static func decodeType5(buf: AISBitBuffer, channel: Character) -> AISTarget? {
-        guard buf.bitCount >= 426 else { return nil }
+        // Real transmitters often truncate the trailing destination / DTE / spare
+        // fields, so a type 5 can be shorter than the nominal 424–426 bits. Only
+        // require the bits up to and including the name (ends at bit 232); the
+        // bit buffer zero-pads any fields read beyond the end.
+        guard buf.bitCount >= 232 else { return nil }
         let mmsi     = buf.uint(8, 30)
         let imo      = buf.uint(40, 30)
         let callsign = buf.text(70, 42)

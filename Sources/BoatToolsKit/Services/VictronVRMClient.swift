@@ -1,6 +1,7 @@
 public import NIOCore
 internal import Foundation
 internal import AsyncHTTPClient
+internal import NIOPosix
 
 
 // MARK: - VictronVRMClient
@@ -96,7 +97,7 @@ public final class VictronVRMClient: @unchecked Sendable {
             guard let f = formatWithUnit, !f.isEmpty else { return nil }
             var s = f
             if let r = s.range(
-                of: #"%[-+ #0]*[0-9]*\.?[0-9]*[lhLqjzt]*[diouxXeEfgGsaAcCpn%]"#,
+                of: #"%[-+ #0]*[0-9]*\.?[0-9]*[lhLqjzt]*[diouxXeEfFgGsaAcCpn%]"#,
                 options: .regularExpression
             ) { s.removeSubrange(r) }
             s = s.trimmingCharacters(in: .whitespaces)
@@ -136,6 +137,29 @@ public final class VictronVRMClient: @unchecked Sendable {
         return w.records
     }
 
+    /// Lists the installations (sites) for a VRM account, managing the network
+    /// event loop internally so callers need no NIO — handy for a settings
+    /// "check connection" step.
+    ///
+    /// - Parameters:
+    ///   - accessToken: VRM personal access token.
+    ///   - userId: VRM numeric user (owner) ID.
+    /// - Returns: The account's installations.
+    public static func installations(accessToken: String, userId: Int) async throws -> [Installation] {
+        let client = VictronVRMClient(
+            config: .init(accessToken: accessToken),
+            eventLoopGroup: MultiThreadedEventLoopGroup.singleton
+        )
+        do {
+            let result = try await client.installations(userId: userId)
+            try? await client.shutdown()
+            return result
+        } catch {
+            try? await client.shutdown()
+            throw error
+        }
+    }
+
     /// Fetches the latest diagnostic records for a site.
     ///
     /// - Parameter siteId: The VRM site (installation) ID.
@@ -156,11 +180,144 @@ public final class VictronVRMClient: @unchecked Sendable {
     public func metrics(siteId: Int) async throws -> [BoatMetric] {
         let records = try await diagnostics(siteId: siteId)
         return records.compactMap { r in
-            guard let v = r.rawValue, let n = r.description else { return nil }
+            guard let n = r.description else { return nil }
+            let v: Double
+            if let raw = r.rawValue {
+                v = raw
+            } else if let derived = Self.booleanValue(description: n, formatted: r.formattedValue) {
+                v = derived
+            } else {
+                return nil
+            }
+            // Map the common Victron devices/measurements onto the canonical
+            // metric names so the rest of the app (instruments, etc.) recognises
+            // them. Anything unmapped keeps its human-readable name.
+            if let canonical = Self.canonicalName(device: r.device, description: n, instance: r.instance) {
+                // VRM reports latitude/longitude with "LAT"/"LNG" units; normalise.
+                let unit = (canonical == "lat" || canonical == "lon") ? "°" : r.unit
+                return BoatMetric(name: canonical, value: v, unit: unit)
+            }
             let tag = r.deviceTag
             let fullName = tag.isEmpty ? n : "\(tag) — \(n)"
             return BoatMetric(name: fullName, value: v, unit: r.unit)
         }
+    }
+
+    /// Maps a VRM (device, description, instance) to a canonical metric name.
+    /// For a recognised device, *every* numeric measurement nests under the
+    /// device's canonical prefix (`battery.0.`, `tank.23.`…) — mapped readings
+    /// get tidy leaves, the rest are slugged — so a pill's detail can show the
+    /// whole device. Unknown devices return `nil` (kept human-readable).
+    static func canonicalName(device: String?, description: String, instance: Int?) -> String? {
+        let i = instance ?? 0
+        let d = description.lowercased()
+        let dev = (device ?? "").lowercased()
+
+        // The gateway carries the boat's position (plus system settings we leave
+        // alone).
+        if dev.contains("gateway") {
+            switch d {
+            case "latitude":  return "lat"
+            case "longitude": return "lon"
+            default:          return nil
+            }
+        }
+
+        let prefix: String
+        if dev.contains("battery monitor") || dev.contains("smartshunt") || dev.contains("bmv") { prefix = "battery" }
+        else if dev.contains("solar charger") || dev.contains("mppt") { prefix = "solar" }
+        else if dev.contains("tank") { prefix = "tank" }
+        else if dev.contains("ve.bus") { prefix = "vebus" }
+        else if dev.contains("system overview") { prefix = "system" }
+        else { return nil }
+
+        return "\(prefix).\(i).\(mappedLeaf(prefix: prefix, description: d) ?? slug(description))"
+    }
+
+    /// A tidy canonical leaf for a recognised measurement, or `nil` to slug it.
+    private static func mappedLeaf(prefix: String, description d: String) -> String? {
+        switch (prefix, d) {
+        case ("battery", "voltage"):                          return "voltage"
+        case ("battery", "current"):                          return "current"
+        case ("battery", "battery temperature"):              return "temperature"
+        case ("battery", "state of charge"):                  return "soc"
+        case ("battery", "consumed amphours"):                return "consumedAh"
+        case ("battery", "time to go"):                       return "timeToGo"
+        case ("battery", "starter battery voltage"):          return "starterVoltage"
+        case ("battery", "capacity"):                         return "capacity"
+        case ("solar", "voltage"):                            return "voltage"
+        case ("solar", "current"):                            return "current"
+        case ("solar", "pv voltage"):                         return "pvVoltage"
+        case ("solar", "pv power"):                           return "pvPower"
+        case ("solar", "battery watts"):                      return "power"
+        case ("solar", "yield today"):                        return "yieldToday"
+        case ("tank", "tank level"), ("tank", "level"):       return "level"
+        case ("tank", "tank capacity"), ("tank", "capacity"): return "capacity"
+        case ("vebus", "active input current limit"):         return "activeInputCurrentLimit"
+        case ("vebus", "ac input 1 current limit"):           return "input1CurrentLimit"
+        case ("vebus", "ac input 2 current limit"):           return "input2CurrentLimit"
+        case ("system", "ac input 1 connected"):              return "input1Connected"
+        case ("system", "ac input 2 connected"):              return "input2Connected"
+        default:                                              return nil
+        }
+    }
+
+    /// A dot-free camelCase leaf from a description ("Tank fluid type" →
+    /// "tankFluidType"), so unmapped numeric readings still nest under the device.
+    private static func slug(_ description: String) -> String {
+        let words = description.split { !$0.isLetter && !$0.isNumber }
+        guard let first = words.first else { return "value" }
+        return words.dropFirst().reduce(String(first).lowercased()) {
+            $0 + $1.prefix(1).uppercased() + $1.dropFirst().lowercased()
+        }
+    }
+
+    /// A 0/1 value for boolean-style measurements whose raw value is text
+    /// ("Connected" / "Not connected"). Only applied to "connected" fields so it
+    /// doesn't flood the feed with every status flag.
+    static func booleanValue(description: String, formatted: String?) -> Double? {
+        guard description.lowercased().contains("connected"),
+              let f = formatted?.lowercased() else { return nil }
+        if f.contains("not") || f.contains("disconnected") { return 0 }
+        if f.contains("connected") { return 1 }
+        return nil
+    }
+
+    /// Fetches custom device names for a site, keyed by canonical metric prefix
+    /// (e.g. `"battery.0"` → `"Lynx 24"`), so instruments can show meaningful
+    /// labels. A one-shot call — custom names rarely change.
+    public static func labels(accessToken: String, siteId: Int) async throws -> [String: String] {
+        let client = VictronVRMClient(
+            config: .init(accessToken: accessToken),
+            eventLoopGroup: MultiThreadedEventLoopGroup.singleton
+        )
+        // The HTTP client must be shut down before it deinits, even on throw.
+        let records: [DiagnosticRecord]
+        do {
+            records = try await client.diagnostics(siteId: siteId)
+        } catch {
+            try? await client.shutdown()
+            throw error
+        }
+        try? await client.shutdown()
+        var result: [String: String] = [:]
+        for record in records {
+            guard let name = record.formattedValue, !name.isEmpty,
+                  let key = labelKey(device: record.device, description: record.description, instance: record.instance)
+            else { continue }
+            result[key] = name
+        }
+        return result
+    }
+
+    private static func labelKey(device: String?, description: String?, instance: Int?) -> String? {
+        guard let d = description?.lowercased() else { return nil }
+        let i = instance ?? 0
+        let dev = (device ?? "").lowercased()
+        if d == "battery custom name", dev.contains("battery monitor") || dev.contains("smartshunt") { return "battery.\(i)" }
+        if d == "solar charger custom name" { return "solar.\(i)" }
+        if d == "tank custom name" { return "tank.\(i)" }
+        return nil
     }
 
     /// Continuously polls a VRM site and yields each batch as ``NMEAFrame``
@@ -191,12 +348,47 @@ public final class VictronVRMClient: @unchecked Sendable {
                     while !Task.isCancelled {
                         let batch = try await self.metrics(siteId: siteId)
                         for m in batch { continuation.yield(.metric(m)) }
+                        // A non-positive interval means snapshot-only: poll once.
+                        if pollInterval <= .zero { break }
                         try await Task.sleep(for: pollInterval)
                     }
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
                 }
+            }
+            continuation.onTermination = { @Sendable _ in task.cancel() }
+        }
+    }
+
+    /// Polls a VRM site as ``NMEAFrame`` values, managing the network event loop
+    /// internally so callers need no NIO. The returned stream retains the client
+    /// for its lifetime. Pipe with ``BoatMetricStore/pipeSignalK(_:)``.
+    ///
+    /// - Parameters:
+    ///   - accessToken: VRM personal access token.
+    ///   - siteId: VRM site (installation) identifier.
+    ///   - pollInterval: Delay between consecutive polls. Defaults to 60 seconds.
+    public static func frameStream(
+        accessToken: String,
+        siteId: Int,
+        pollInterval: Duration = .seconds(60)
+    ) -> AsyncThrowingStream<NMEAFrame, any Error> {
+        let client = VictronVRMClient(
+            config: .init(accessToken: accessToken),
+            eventLoopGroup: MultiThreadedEventLoopGroup.singleton
+        )
+        let inner = client.frameStream(siteId: siteId, pollInterval: pollInterval)
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    for try await frame in inner { continuation.yield(frame) }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+                // Shut the HTTP client down before it deinits (or it traps).
+                try? await client.shutdown()
             }
             continuation.onTermination = { @Sendable _ in task.cancel() }
         }

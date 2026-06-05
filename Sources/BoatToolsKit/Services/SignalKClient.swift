@@ -131,6 +131,27 @@ public final class SignalKClient: @unchecked Sendable {
     /// - Parameters:
     ///   - eventLoopGroup: NIO event loop group to run the WebSocket on.
     ///   - rawLogger: Optional sink for every raw text frame before parsing.
+    /// Opens a Signal K live WebSocket stream, managing the network event loop
+    /// internally so callers need no NIO. The returned stream retains the client
+    /// for its lifetime. Pipe with ``BoatMetricStore/pipeSignalK(_:)``.
+    public static func liveStream(config: Config) async -> AsyncThrowingStream<NMEAFrame, any Error> {
+        let client = SignalKClient(config: config, eventLoopGroup: MultiThreadedEventLoopGroup.singleton)
+        let inner = await client.liveStream(on: MultiThreadedEventLoopGroup.singleton)
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    for try await frame in inner { continuation.yield(frame) }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+                // Shut the HTTP client down before it deinits (or it traps).
+                try? await client.shutdown()
+            }
+            continuation.onTermination = { @Sendable _ in task.cancel() }
+        }
+    }
+
     public func liveStream(
         on eventLoopGroup: any EventLoopGroup,
         rawLogger: (@Sendable (String) -> Void)? = nil
