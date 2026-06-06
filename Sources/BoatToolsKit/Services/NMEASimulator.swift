@@ -870,16 +870,18 @@ public enum NMEASimulator {
                 latitude: 41.39, longitude: 9.18, shipName: "BONIFACIO SW",
                 navAidType: .buoySafeWater)))
         }
-        // Safety broadcast.
+        // Safety broadcast — free-text securité message, like a coast station.
         if tick % 53 == 19 {
             continuation.yield(.aisTarget(AISTarget(
-                mmsi: 247_990_500, messageType: .safetyBroadcastMessage, channel: "A")))
+                mmsi: 247_990_500, messageType: .safetyBroadcastMessage, channel: "A",
+                text: "SECURITE NAVAL EXERCISE 4208N 00830E WIDE BERTH REQUESTED")))
         }
-        // Binary / weather broadcast.
+        // Binary / weather broadcast — carries a short meteo bulletin as text.
         if tick % 67 == 23 {
             continuation.yield(.aisTarget(AISTarget(
                 mmsi: 2_270_300, messageType: .binaryBroadcastMessage, channel: "A",
-                latitude: 43.40, longitude: 7.90)))
+                latitude: 43.40, longitude: 7.90,
+                text: "WX WNW 18KT GUST 24 1014HPA SEA MODERATE")))
         }
         // SART / distress (MMSI 970xxxxxx) — rare.
         if tick % 131 == 64 {
