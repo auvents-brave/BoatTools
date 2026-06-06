@@ -890,6 +890,20 @@ public enum NMEASimulator {
                 latitude: 42.40, longitude: 8.60,
                 speedOverGround: 0, courseOverGround: 0)))
         }
+        // SAR aircraft (msg 9) — a coastguard plane on patrol, with altitude.
+        if tick % 89 == 31 {
+            continuation.yield(.aisTarget(AISTarget(
+                mmsi: 111_232_500, messageType: .standardSARAircraftReport, channel: "B",
+                latitude: 43.10, longitude: 7.70,
+                speedOverGround: 120, courseOverGround: 270,
+                shipName: "RESCUE 65", altitude: 450)))
+        }
+        // Addressed safety message (msg 12) — directed at a vessel.
+        if tick % 97 == 41 {
+            continuation.yield(.aisTarget(AISTarget(
+                mmsi: 227_006_760, messageType: .addressedSafetyMessage, channel: "A",
+                text: "KEEP CLEAR OF FAIRWAY INBOUND TRAFFIC")))
+        }
     }
 
     // MARK: Tank / battery / temperature models
