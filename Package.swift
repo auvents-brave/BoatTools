@@ -15,7 +15,10 @@ var boatToolsKitDeps: [Target.Dependency] = [
 ]
 
 var deps: [Package.Dependency] = [
-    .package(url: "https://github.com/apple/swift-nio.git",         from: "2.65.0"),
+    // Pinned below 2.100.0: that release regressed the Windows build (strict-Sendable
+    // errors in NIOPosix's NIOThread / ThreadWindows under the Swift 6.3 toolchain).
+    // Lift the upper bound once swift-nio's Windows support is fixed upstream.
+    .package(url: "https://github.com/apple/swift-nio.git",         "2.65.0" ..< "2.100.0"),
     .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
 ]
 
