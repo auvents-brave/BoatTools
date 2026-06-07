@@ -603,6 +603,9 @@ struct BoatToolsCLI: AsyncParsableCommand {
 enum WireFormat: String, ExpressibleByArgument, CaseIterable, Sendable {
     case auto, nmea0183, ydraw, seasmart, signalk, canboat, ikonvert
 
+    // Maps to the NIO transport's input format — unavailable on Windows, where
+    // the NIO-based transports are compiled out.
+    #if !os(Windows)
     var transportFormat: NMEAInputFormat {
         switch self {
         case .auto:     return .auto
@@ -614,6 +617,7 @@ enum WireFormat: String, ExpressibleByArgument, CaseIterable, Sendable {
         case .ikonvert: return .iKonvert
         }
     }
+    #endif
 }
 
 
