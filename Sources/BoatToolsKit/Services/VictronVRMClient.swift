@@ -1,3 +1,7 @@
+// The Victron VRM client is built entirely on the HTTP stack (AsyncHTTPClient),
+// which does not build on Windows. The whole client is therefore compiled out
+// there; the `vrm` CLI command prints a "not yet supported" notice instead.
+#if !os(Windows)
 public import NIOCore
 internal import Foundation
 internal import AsyncHTTPClient
@@ -413,3 +417,4 @@ public final class VictronVRMClient: @unchecked Sendable {
         }
     }
 }
+#endif

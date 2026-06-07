@@ -19,13 +19,38 @@ import Musl
 
 // MARK: - ANSI colours (TTY-gated)
 
+/// Whether the given file descriptor is an interactive terminal. Returns `false`
+/// on Windows, where ANSI styling and interactive prompts are disabled (the
+/// platform `isatty` is not wired up in this build).
+fileprivate func fdIsTTY(_ fd: Int32) -> Bool {
+    #if os(Windows)
+    return false
+    #else
+    return isatty(fd) != 0
+    #endif
+}
+
 /// ANSI escape codes only when stdout is a terminal — keeps pipes/redirects clean.
-fileprivate let isStdoutTTY: Bool = isatty(1) != 0
+fileprivate let isStdoutTTY: Bool = fdIsTTY(1)
 fileprivate let ANSI_RED:    String = isStdoutTTY ? "\u{1B}[31m"        : ""
 fileprivate let ANSI_ORANGE: String = isStdoutTTY ? "\u{1B}[38;5;208m" : ""
 fileprivate let ANSI_YELLOW: String = isStdoutTTY ? "\u{1B}[33m"        : ""
 fileprivate let ANSI_DIM:    String = isStdoutTTY ? "\u{1B}[2m"         : ""
 fileprivate let ANSI_RESET:  String = isStdoutTTY ? "\u{1B}[0m"         : ""
+
+#if os(Windows)
+// MARK: - Windows feature gating
+
+/// Reports that a web-facing feature is unavailable on Windows and signals a
+/// non-zero exit. The HTTP/WebSocket stack behind Signal K REST/WebSocket and
+/// Victron VRM does not build on Windows; `tcp://`/`udp://` connections and all
+/// decoding remain available.
+fileprivate func reportWebUnsupportedOnWindows(_ feature: String) throws {
+    let message = "\(feature) is not yet supported on Windows. Use a tcp:// or udp:// connection instead.\n"
+    FileHandle.standardError.write(Data(message.utf8))
+    throw ExitCode.failure
+}
+#endif
 
 // MARK: - Coordinate formatting
 
@@ -465,6 +490,7 @@ fileprivate extension String {
     var nonEmpty: String? { isEmpty ? nil : self }
 }
 
+#if !os(Windows)
 /// Pretty-prints a batch of VRM diagnostic records, grouped by physical device.
 /// Each group has its own header; labels are padded for readable column alignment.
 /// Uses `formattedValue` ("12.43 V", "85 %") when present so units come pre-formatted
@@ -509,6 +535,7 @@ fileprivate func renderVRMDiagnostics(_ records: [VictronVRMClient.DiagnosticRec
         }
     }
 }
+#endif  // !os(Windows)
 
 /// Polls a one-shot REST `body` every `watch` seconds. `watch == 0` → single call (no polling).
 /// `duration == 0` → forever (when polling). Errors during polling are printed to stderr and the
@@ -550,6 +577,7 @@ struct BoatToolsCLI: AsyncParsableCommand {
         return CommandConfiguration(
             commandName: "boattools",
             abstract: "CLI tools to explore sailboat data sources",
+            version: ToolVersion.current,
             subcommands: subs)
     }()
 }
@@ -824,6 +852,9 @@ struct ConnectCommand: AsyncParsableCommand {
 
     private func runWeb(urlStr: String, elg: any EventLoopGroup,
                         rawLogger: (@Sendable (String) -> Void)? = nil) async throws {
+        #if os(Windows)
+        try reportWebUnsupportedOnWindows("Signal K over HTTP/WebSocket")
+        #else
         let client = SignalKClient(
             config: .init(baseURL: urlStr, token: token, username: username, password: password),
             eventLoopGroup: elg)
@@ -859,6 +890,7 @@ struct ConnectCommand: AsyncParsableCommand {
         }
 
         try await client.shutdown()
+        #endif  // os(Windows)
     }
 }
 
@@ -993,6 +1025,9 @@ struct VRMCommand: AsyncParsableCommand {
     var duration: Int = 0
 
     func run() async throws {
+        #if os(Windows)
+        try reportWebUnsupportedOnWindows("The vrm command")
+        #else
         let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         let client = VictronVRMClient(config: .init(accessToken: token), eventLoopGroup: elg)
 
@@ -1015,6 +1050,7 @@ struct VRMCommand: AsyncParsableCommand {
 
         try await client.shutdown()
         try await elg.shutdownGracefully()
+        #endif  // os(Windows)
     }
 }
 
@@ -1050,8 +1086,8 @@ struct DiscoverCommand: AsyncParsableCommand {
             // Already a user-friendly message (e.g. missing Avahi on Linux).
             // Print it in red on stderr and exit cleanly so users see the
             // install instructions without a Swift stack trace.
-            let red   = isatty(2) != 0 ? "\u{1B}[31m" : ""
-            let reset = isatty(2) != 0 ? "\u{1B}[0m"  : ""
+            let red   = fdIsTTY(2) ? "\u{1B}[31m" : ""
+            let reset = fdIsTTY(2) ? "\u{1B}[0m"  : ""
             FileHandle.standardError.write(Data("\(red)\(msg)\(reset)\n".utf8))
             throw ExitCode.failure
         }
@@ -1062,7 +1098,7 @@ struct DiscoverCommand: AsyncParsableCommand {
         }
 
         // Non-interactive: stop at the listing.
-        let isTTY = isatty(0) != 0
+        let isTTY = fdIsTTY(0)
         if noInteractive || !isTTY {
             return
         }

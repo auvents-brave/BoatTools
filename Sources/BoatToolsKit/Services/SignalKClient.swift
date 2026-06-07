@@ -1,9 +1,14 @@
 public import NIOCore
 internal import NIOPosix
 internal import Foundation
+// REST snapshots and WebSocket live streams rely on the HTTP stack, which does
+// not build on Windows. These imports and the members that use them are gated;
+// Signal K decoding and TCP/UDP streaming below remain available everywhere.
+#if !os(Windows)
 internal import AsyncHTTPClient
 internal import WebSocketKit
 internal import NIOHTTP1
+#endif
 
 
 // MARK: - SignalKClient
@@ -44,6 +49,8 @@ public final class SignalKClient: @unchecked Sendable {
             self.password   = password
         }
     }
+
+    #if !os(Windows)
 
     // MARK: TokenStore
 
@@ -187,6 +194,8 @@ public final class SignalKClient: @unchecked Sendable {
         }
     }
 
+    #endif  // !os(Windows)
+
     // MARK: TCP / UDP streaming (no auth)
 
     /// Streams raw Signal K NDJSON deltas from a TCP connection.
@@ -244,7 +253,11 @@ public final class SignalKClient: @unchecked Sendable {
             let emit: @Sendable (NMEAFrame) -> Void = { continuation.yield($0) }
             DatagramBootstrap(group: eventLoopGroup)
                 .channelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
+                // SO_REUSEPORT is a BSD/Linux socket option with no Windows
+                // equivalent — skip it there so the UDP path still builds.
+                #if !os(Windows)
                 .channelOption(ChannelOptions.socketOption(.init(rawValue: SO_REUSEPORT)), value: 1)
+                #endif
                 .channelOption(ChannelOptions.socketOption(.so_broadcast), value: 1)
                 .channelInitializer { channel in
                     channel.eventLoop.makeCompletedFuture {
@@ -555,6 +568,8 @@ public final class SignalKClient: @unchecked Sendable {
 
     // MARK: Helpers
 
+    #if !os(Windows)
+
     /// Strips trailing `/` and `/signalk` suffix so that a base URL returned by
     /// Bonjour TXT records (e.g. `http://host:3000/signalk`) doesn't produce a
     /// doubled path when REST endpoints are appended.
@@ -573,6 +588,8 @@ public final class SignalKClient: @unchecked Sendable {
             req.headers.add(name: "Authorization", value: "Basic \(basic)")
         }
     }
+
+    #endif  // !os(Windows)
 }
 
 

@@ -842,10 +842,6 @@ public final class BoatMetricStore {
     /// device compass are available).
     private var headingDerivedFromCOG = false
 
-    /// Whether `metrics["magneticVariation"]` currently holds a value we derived
-    /// from the true/magnetic heading pair rather than a reported variation.
-    private var variationDerived = false
-
     private func flush(at now: Date) {
         let (newMetrics, newAIS, newGSV) = (
             collector.candidates.values.map(\.metric),
@@ -860,13 +856,6 @@ public final class BoatMetricStore {
         if headingDerivedFromCOG {
             metrics["HDG.true"] = nil
             headingDerivedFromCOG = false
-        }
-
-        // Drop the previous flush's derived variation so a reported one can take
-        // over, and so the derived value tracks changing headings.
-        if variationDerived {
-            metrics["magneticVariation"] = nil
-            variationDerived = false
         }
 
         // Merge metrics and feed histories.
@@ -886,28 +875,6 @@ public final class BoatMetricStore {
                 name: "HDG.true", value: cog.value, unit: cog.unit, timestamp: cog.timestamp
             )
             headingDerivedFromCOG = true
-        }
-
-        // Derive the magnetic variation whenever both true and magnetic heading
-        // are known but no variation was reported — regardless of source (device
-        // compass, NMEA 0183, NMEA 2000, Signal K…). Convention: positive = East
-        // (true north east of magnetic north). A reported `magneticVariation`
-        // always wins, since it is left untouched here.
-        if metrics["magneticVariation"] == nil,
-           !headingDerivedFromCOG,
-           let trueHeading = metrics["HDG.true"],
-           let magneticHeading = metrics["HDG.magnetic"] {
-            var variation = trueHeading.value - magneticHeading.value
-            if variation > 180 {
-                variation -= 360
-            } else if variation < -180 {
-                variation += 360
-            }
-            metrics["magneticVariation"] = BoatMetric(
-                name: "magneticVariation", value: variation, unit: "°",
-                timestamp: max(trueHeading.timestamp, magneticHeading.timestamp)
-            )
-            variationDerived = true
         }
 
         // Merge AIS targets (preserve static fields from older reports).

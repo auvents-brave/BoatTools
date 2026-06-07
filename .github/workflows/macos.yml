@@ -21,5 +21,7 @@ jobs:
           xcode-version: "26.5"
       - name: Check Swift Version
         run: swift --version
+      - name: Generate version
+        run: ./Scripts/version.sh Sources/BoatTools/Version.generated.swift
       - run: swift build -c release
       - run: swift test

@@ -9,19 +9,26 @@ let sharedSwiftSettings: [SwiftSetting] = [
 ]
 
 var boatToolsKitDeps: [Target.Dependency] = [
-    .product(name: "NIOCore",         package: "swift-nio"),
-    .product(name: "NIOPosix",        package: "swift-nio"),
-    .product(name: "AsyncHTTPClient", package: "async-http-client"),
-    .product(name: "WebSocketKit",    package: "websocket-kit"),
-    .product(name: "Stheno",          package: "Stheno"),
+    .product(name: "NIOCore",  package: "swift-nio"),
+    .product(name: "NIOPosix", package: "swift-nio"),
+    .product(name: "Stheno",   package: "Stheno"),
 ]
 
 var deps: [Package.Dependency] = [
-    .package(url: "https://github.com/apple/swift-nio.git",            from: "2.65.0"),
-    .package(url: "https://github.com/swift-server/async-http-client", from: "1.20.0"),
-    .package(url: "https://github.com/vapor/websocket-kit.git",        from: "2.14.0"),
-    .package(url: "https://github.com/apple/swift-argument-parser",    from: "1.3.0"),
+    .package(url: "https://github.com/apple/swift-nio.git",         from: "2.65.0"),
+    .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
 ]
+
+// HTTP + WebSocket stack. AsyncHTTPClient and WebSocketKit do not build on
+// Windows, so the web-facing code paths (Signal K REST/WebSocket and Victron
+// VRM) are compiled out there via `#if !os(Windows)` guards in the sources.
+// TCP/UDP networking and all Signal K decoding stay available on Windows.
+#if !os(Windows)
+deps.append(.package(url: "https://github.com/swift-server/async-http-client", from: "1.20.0"))
+deps.append(.package(url: "https://github.com/vapor/websocket-kit.git",        from: "2.14.0"))
+boatToolsKitDeps.append(.product(name: "AsyncHTTPClient", package: "async-http-client"))
+boatToolsKitDeps.append(.product(name: "WebSocketKit",    package: "websocket-kit"))
+#endif
 
 // Stheno: use the sibling working copy only during local development — never
 // when BoatTools is itself a checked-out dependency (its parent directory is

@@ -7,3 +7,6 @@ xcode
 .vscode
 
 commands.sh
+
+# Generated at build time by Scripts/version.sh — never committed.
+Sources/BoatTools/Version.generated.swift

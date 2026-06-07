@@ -331,6 +331,8 @@ public enum NMEASimulator {
             level: tankFuel(n), capacityL: 400), into: continuation)
         yieldFrame(pgn: 127505, data: fluidLevelPayload(instance: 0, type: 1,
             level: tankFreshWater(n), capacityL: 200), into: continuation)
+        yieldFrame(pgn: 127505, data: fluidLevelPayload(instance: 1, type: 1,
+            level: tankFreshWater2(n), capacityL: 150), into: continuation)
         yieldFrame(pgn: 127505, data: fluidLevelPayload(instance: 0, type: 5,
             level: tankBlackWater(n), capacityL: 80), into: continuation)
         yieldFrame(pgn: 127505, data: fluidLevelPayload(instance: 1, type: 2,
@@ -354,10 +356,11 @@ public enum NMEASimulator {
         yieldFrame(pgn: 130312, data: temperaturePayload(instance: 3, source: 13,
             celsius: -18 + 2 * sin(n * 0.025)), into: continuation)
 
-        // Windlass: anchor stowed (up) while under way.
-        yieldFrame(pgn: 128777, data: windlassOperatingPayload(anchorUp: true),
-                   into: continuation)
-        yieldFrame(pgn: 128778, data: windlassMonitoringPayload(), into: continuation)
+        // Windlass: the anchor is up (stowed) while under way — idle, every
+        // windlass metric populated across the three windlass PGNs.
+        yieldFrame(pgn: 128776, data: windlassControlPayload(), into: continuation)
+        yieldFrame(pgn: 128777, data: windlassOperatingPayload(), into: continuation)
+        yieldFrame(pgn: 128778, data: windlassMonitoringPayload(n: n), into: continuation)
 
         // Distance log (total + trip).
         yieldFrame(pgn: 128275, data: distanceLogPayload(
@@ -677,16 +680,34 @@ public enum NMEASimulator {
         return [0x00, instance, source] + raw + littleEndian(UInt16(0xFFFF)) + [0xFF]
     }
 
-    /// PGN 128777 — Windlass Operating Status (anchor docked/up or deployed).
-    private static func windlassOperatingPayload(anchorUp: Bool) -> [UInt8] {
-        let docking: UInt8 = anchorUp ? 1 : 2          // bits 4-5
-        let status = (docking << 4) | (1 << 2) | 1     // rode = chain (bits 2-3), motion = stopped
-        return [0x00] + littleEndian(UInt16(0)) + [0x00, status, 0xFF]
+    /// PGN 128776 — Windlass Control Status. Nothing is being commanded while the
+    /// anchor is stowed (direction off / idle).
+    private static func windlassControlPayload() -> [UInt8] {
+        // byte 1 bits 0-1 = direction control: 0 = off / idle.
+        [0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
     }
 
-    /// PGN 128778 — Windlass Monitoring Status (motor hours/voltage/current).
-    private static func windlassMonitoringPayload() -> [UInt8] {
-        [0x00, 0x2A] + littleEndian(UInt16((12.4 / 0.01).rounded())) + littleEndian(UInt16(0)) + [0xFF]
+    /// PGN 128777 — Windlass Operating Status: the anchor is fully docked (up) and
+    /// the windlass is stopped, with all the chain in.
+    private static func windlassOperatingPayload() -> [UInt8] {
+        let motion: UInt8 = 1                                    // 1 = stopped (decoded to 0)
+        let rode: UInt8 = 1                                      // 1 = chain
+        let docking: UInt8 = 1                                   // 1 = fully docked (anchor up)
+        let status = (docking << 4) | (rode << 2) | motion
+        return [0x00]
+            + littleEndian(UInt16(0))                           // rode counter: 0 m out (all in)
+            + [0x00]                                             // operating speed: 0 m/s (stopped)
+            + [status, 0xFF]
+    }
+
+    /// PGN 128778 — Windlass Monitoring Status: motor hours, controller (battery)
+    /// voltage at rest and no motor current while idle.
+    private static func windlassMonitoringPayload(n: Double) -> [UInt8] {
+        let voltage = 12.6 + 0.1 * sin(n * 0.02)                // V, resting battery
+        return [0x00, 0x2A]                                      // instance 0, 42 motor hours
+            + littleEndian(UInt16((voltage / 0.01).rounded()))
+            + littleEndian(UInt16(0))                           // motor current: 0 A (idle)
+            + [0x00]
     }
 
     /// PGN 128275 — Distance Log (total + trip, metres on the wire).
@@ -910,6 +931,7 @@ public enum NMEASimulator {
 
     static func tankFuel(_ n: Double) -> Double { max(5, 82 - n * 0.0006) }
     static func tankFreshWater(_ n: Double) -> Double { max(8, 68 - n * 0.0004) }
+    static func tankFreshWater2(_ n: Double) -> Double { max(6, 54 - n * 0.0003) }
     static func tankBlackWater(_ n: Double) -> Double { min(95, 12 + n * 0.0005) }
     static func tankGreyWater(_ n: Double) -> Double { min(92, 20 + n * 0.00045) }
 
