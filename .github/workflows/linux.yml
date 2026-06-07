@@ -41,5 +41,7 @@ jobs:
         run: swift --version
       - name: Install Avahi (Bonjour/mDNS compatibility layer)
         run: sudo apt-get install -y libavahi-compat-libdnssd-dev
+      - name: Generate version
+        run: ./Scripts/version.sh Sources/BoatTools/Version.generated.swift
       - run: swift build -c release
       - run: swift test

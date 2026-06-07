@@ -1,3 +1,9 @@
+// The Signal K client is built on swift-nio (NIOPosix) for TCP/UDP and on the
+// HTTP stack (AsyncHTTPClient / WebSocketKit) for REST and WebSocket. Neither
+// builds on Windows, so the whole client is compiled out there; the Signal K /
+// NMEA decoders that it exposes as static helpers live elsewhere and remain
+// available.
+#if !os(Windows)
 public import NIOCore
 internal import NIOPosix
 internal import Foundation
@@ -44,6 +50,8 @@ public final class SignalKClient: @unchecked Sendable {
             self.password   = password
         }
     }
+
+    #if !os(Windows)
 
     // MARK: TokenStore
 
@@ -187,6 +195,8 @@ public final class SignalKClient: @unchecked Sendable {
         }
     }
 
+    #endif  // !os(Windows)
+
     // MARK: TCP / UDP streaming (no auth)
 
     /// Streams raw Signal K NDJSON deltas from a TCP connection.
@@ -244,7 +254,11 @@ public final class SignalKClient: @unchecked Sendable {
             let emit: @Sendable (NMEAFrame) -> Void = { continuation.yield($0) }
             DatagramBootstrap(group: eventLoopGroup)
                 .channelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
+                // SO_REUSEPORT is a BSD/Linux socket option with no Windows
+                // equivalent — skip it there so the UDP path still builds.
+                #if !os(Windows)
                 .channelOption(ChannelOptions.socketOption(.init(rawValue: SO_REUSEPORT)), value: 1)
+                #endif
                 .channelOption(ChannelOptions.socketOption(.so_broadcast), value: 1)
                 .channelInitializer { channel in
                     channel.eventLoop.makeCompletedFuture {
@@ -555,6 +569,8 @@ public final class SignalKClient: @unchecked Sendable {
 
     // MARK: Helpers
 
+    #if !os(Windows)
+
     /// Strips trailing `/` and `/signalk` suffix so that a base URL returned by
     /// Bonjour TXT records (e.g. `http://host:3000/signalk`) doesn't produce a
     /// doubled path when REST endpoints are appended.
@@ -573,6 +589,8 @@ public final class SignalKClient: @unchecked Sendable {
             req.headers.add(name: "Authorization", value: "Basic \(basic)")
         }
     }
+
+    #endif  // !os(Windows)
 }
 
 
@@ -633,3 +651,5 @@ fileprivate final class SignalKHandlerUDP: ChannelInboundHandler, @unchecked Sen
         SignalKClient.handleText(text, emit: emit)
     }
 }
+
+#endif  // !os(Windows)

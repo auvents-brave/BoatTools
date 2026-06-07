@@ -200,11 +200,23 @@ extension DeviceSensors: @preconcurrency CLLocationManagerDelegate {
                               value: newHeading.magneticHeading,
                               unit: "°", timestamp: newHeading.timestamp))
         if newHeading.trueHeading >= 0 {
-            // Both magnetic and true heading are reported; the store derives the
-            // local magnetic variation from the pair (see ``BoatMetricStore``),
-            // so we no longer compute it here.
             cont.yield(BoatMetric(name: "HDG.true",
                                   value: newHeading.trueHeading,
+                                  unit: "°", timestamp: newHeading.timestamp))
+            // The device compass reports true and magnetic heading from the same
+            // sensor at the same instant, so their difference is a sound estimate
+            // of the local magnetic variation. We only derive it here, never in
+            // the shared store: on a real boat the two headings may come from
+            // distinct instruments and subtracting them would yield nonsense
+            // (e.g. an 80° variation). Convention: positive = East.
+            var variation = newHeading.trueHeading - newHeading.magneticHeading
+            if variation > 180 {
+                variation -= 360
+            } else if variation < -180 {
+                variation += 360
+            }
+            cont.yield(BoatMetric(name: "magneticVariation",
+                                  value: variation,
                                   unit: "°", timestamp: newHeading.timestamp))
         }
     }

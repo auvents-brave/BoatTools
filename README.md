@@ -9,10 +9,28 @@ The package ships two products:
 
 ## Install
 
-Pre-built binaries are attached to every [release](https://github.com/auvents-brave/BoatTools/releases):
+Download pre-built binaries for **macOS, Linux and Windows** from
+**[pitch-and-roll.com](https://pitch-and-roll.com)** — it lists, for every
+supported platform, both the latest stable release and the in-development build
+from the `lab` branch.
 
-- **macOS** (Apple Silicon + Intel) — [`boattools-macos-universal.pkg`](https://github.com/auvents-brave/BoatTools/releases/latest/download/boattools-macos-universal.pkg): installs `boattools` into `/usr/local/bin`. BoatTools is signed and **notarised by Apple**, so it installs without any Gatekeeper warning. 
-- **Linux** (x86_64) — [`boattools-linux-x86_64.tar.gz`](https://github.com/auvents-brave/BoatTools/releases/latest/download/boattools-linux-x86_64.tar.gz). `discover` on Linux needs the Avahi compatibility library (`libavahi-compat-libdnssd-dev`).
+The macOS package is signed and **notarised by Apple**, so it installs without
+any Gatekeeper warning, dropping `boattools` into `/usr/local/bin`. On Linux,
+`discover` needs the Avahi compatibility library (`libavahi-compat-libdnssd-dev`).
+
+### Build from source
+
+```
+make build      # debug build
+make release    # optimised build
+make run        # build and run boattools
+make test       # run the test suite
+```
+
+Build through `make` rather than `swift build` directly: the `version` target
+regenerates the embedded version string (`Sources/BoatTools/Version.generated.swift`,
+git-ignored) from `git describe`, so `boattools --version` stays accurate. A bare
+`swift build` still works, but the version is only refreshed when you run `make`.
 
 ## Swift 6 strict concurrency highlights
 
@@ -99,6 +117,7 @@ boattools connect    — all transports: TCP, UDP broadcast/multicast, Signal K 
 boattools file       — read and parse a local log file
 boattools vrm        — Victron VRM cloud
 boattools discover   — LAN discovery via Bonjour/mDNS
+boattools --version  — print the version string
 ```
 
 ## Examples

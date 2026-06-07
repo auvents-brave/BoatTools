@@ -1,0 +1,31 @@
+name: Windows
+on: { push: { branches: [main, lab] }, pull_request: {}, workflow_dispatch: {} }
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.repository }}-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SWIFT_VERSION: "6.3.2"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v6
+      # The HTTP/WebSocket stack (Signal K REST/WS, Victron VRM) is compiled out
+      # on Windows via #if !os(Windows); this job verifies the gated build.
+      - uses: compnerd/gha-setup-swift@main
+        with:
+          branch: swift-${{ env.SWIFT_VERSION }}-release
+          tag: ${{ env.SWIFT_VERSION }}-RELEASE
+      - name: Check Swift Version
+        run: swift --version
+      - name: Generate version
+        shell: bash
+        run: bash Scripts/version.sh Sources/BoatTools/Version.generated.swift
+      - run: swift build -c release

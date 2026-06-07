@@ -215,6 +215,37 @@ extension AISBitWriter {
         w.appendUInt(pressureMinus800, bits: 9) // 179: air pressure (hPa, offset 800)
         return w
     }
+
+    /// Builds an IMO 289 IFM 31 meteo/hydro type-8 payload (wider position
+    /// encoding; pressure offset 799).
+    static func type8MeteoIFM31(
+        mmsi: UInt32,
+        lonScaled1000Min: Int32, latScaled1000Min: Int32,
+        avgWindKn: UInt32, gustWindKn: UInt32,
+        windDirDeg: UInt32, gustDirDeg: UInt32,
+        tempTenthsC: Int32, humidityPercent: UInt32,
+        dewPointTenthsC: Int32, pressureMinus799: UInt32
+    ) -> Self {
+        var w = AISBitWriter()
+        w.appendUInt(8, bits: 6)                // 0:   type 8
+        w.appendUInt(0, bits: 2)                // 6:   repeat
+        w.appendUInt(mmsi, bits: 30)            // 8:   source MMSI
+        w.appendUInt(0, bits: 2)                // 38:  spare
+        w.appendUInt(1, bits: 10)               // 40:  DAC = 1
+        w.appendUInt(31, bits: 6)               // 50:  FI = 31
+        w.appendInt(lonScaled1000Min, bits: 25) // 56:  longitude (1/1000 min)
+        w.appendInt(latScaled1000Min, bits: 24) // 81:  latitude  (1/1000 min)
+        w.appendUInt(0, bits: 17)               // 105: pos accuracy + day + hour + minute
+        w.appendUInt(avgWindKn, bits: 7)        // 122: average wind speed
+        w.appendUInt(gustWindKn, bits: 7)       // 129: gust speed
+        w.appendUInt(windDirDeg, bits: 9)       // 136: wind direction
+        w.appendUInt(gustDirDeg, bits: 9)       // 145: gust direction
+        w.appendInt(tempTenthsC, bits: 11)      // 154: air temperature
+        w.appendUInt(humidityPercent, bits: 7)  // 165: relative humidity
+        w.appendInt(dewPointTenthsC, bits: 10)  // 172: dew point
+        w.appendUInt(pressureMinus799, bits: 9) // 182: air pressure (offset 799)
+        return w
+    }
 }
 
 // MARK: - Tests
@@ -395,6 +426,72 @@ struct AISTests {
         #expect(byName["humidity"] == 65)
         #expect(byName["temperature.dewPoint"].map { abs($0 - 14.5) < 1e-6 } ?? false)
         #expect(byName["pressure.atmospheric"] == 1013)
+    }
+
+    @Test func `Type 8 IFM 31 — current meteo standard decodes wind, temperature, pressure`() throws {
+        let writer = AISBitWriter.type8MeteoIFM31(
+            mmsi: 002_270_001,
+            lonScaled1000Min: Int32((7.0 * 60_000).rounded()),
+            latScaled1000Min: Int32((43.5 * 60_000).rounded()),
+            avgWindKn: 12, gustWindKn: 18,
+            windDirDeg: 225, gustDirDeg: 230,
+            tempTenthsC: 188,                       // 18.8 °C
+            humidityPercent: 72,
+            dewPointTenthsC: 132,                   // 13.2 °C
+            pressureMinus799: 214                   // 1013 hPa = 799 + 214
+        )
+        let (payload, fillBits) = writer.payload()
+        let metrics = try #require(
+            AISDecoder.decodeMeteoMetrics(payload: payload, fillBits: fillBits)
+        )
+        let byName = Dictionary(uniqueKeysWithValues: metrics.map { ($0.name, $0.value) })
+        #expect(byName["TWS"] == 12)
+        #expect(byName["TWS.gust"] == 18)
+        #expect(byName["TWD"] == 225)
+        #expect(byName["TWD.gust"] == 230)
+        #expect(byName["temperature.air"].map { abs($0 - 18.8) < 1e-6 } ?? false)
+        #expect(byName["humidity"] == 72)
+        #expect(byName["temperature.dewPoint"].map { abs($0 - 13.2) < 1e-6 } ?? false)
+        #expect(byName["pressure.atmospheric"] == 1013)
+    }
+
+    // MARK: Types 12 & 14 — Safety messages (free text)
+
+    @Test func `Type 14 broadcast safety message decodes its text`() throws {
+        var w = AISBitWriter()
+        w.appendUInt(14, bits: 6)            // message type
+        w.appendUInt(0,  bits: 2)            // repeat indicator
+        w.appendUInt(351_809_000, bits: 30)  // source MMSI
+        w.appendUInt(0,  bits: 2)            // spare
+        w.appendText("SAFETY TEST MSG", totalBits: 15 * 6)
+        let (payload, fillBits) = w.payload()
+
+        let target = try #require(
+            AISDecoder.decode(payload: payload, fillBits: fillBits, channel: "A")
+        )
+        #expect(target.messageType == .safetyBroadcastMessage)
+        #expect(target.mmsi == 351_809_000)
+        #expect(target.text == "SAFETY TEST MSG")
+    }
+
+    @Test func `Type 12 addressed safety message decodes its text`() throws {
+        var w = AISBitWriter()
+        w.appendUInt(12, bits: 6)            // message type
+        w.appendUInt(0,  bits: 2)            // repeat indicator
+        w.appendUInt(123_456_789, bits: 30)  // source MMSI
+        w.appendUInt(0,  bits: 2)            // sequence number
+        w.appendUInt(987_654_321, bits: 30)  // destination MMSI
+        w.appendUInt(0,  bits: 1)            // retransmit flag
+        w.appendUInt(0,  bits: 1)            // spare
+        w.appendText("MEET AT MARINA", totalBits: 14 * 6)
+        let (payload, fillBits) = w.payload()
+
+        let target = try #require(
+            AISDecoder.decode(payload: payload, fillBits: fillBits, channel: "B")
+        )
+        #expect(target.messageType == .addressedSafetyMessage)
+        #expect(target.mmsi == 123_456_789)
+        #expect(target.text == "MEET AT MARINA")
     }
 
     // MARK: Unrecognised payload

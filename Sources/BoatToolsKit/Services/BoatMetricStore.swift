@@ -842,10 +842,6 @@ public final class BoatMetricStore {
     /// device compass are available).
     private var headingDerivedFromCOG = false
 
-    /// Whether `metrics["magneticVariation"]` currently holds a value we derived
-    /// from the true/magnetic heading pair rather than a reported variation.
-    private var variationDerived = false
-
     private func flush(at now: Date) {
         let (newMetrics, newAIS, newGSV) = (
             collector.candidates.values.map(\.metric),
@@ -860,13 +856,6 @@ public final class BoatMetricStore {
         if headingDerivedFromCOG {
             metrics["HDG.true"] = nil
             headingDerivedFromCOG = false
-        }
-
-        // Drop the previous flush's derived variation so a reported one can take
-        // over, and so the derived value tracks changing headings.
-        if variationDerived {
-            metrics["magneticVariation"] = nil
-            variationDerived = false
         }
 
         // Merge metrics and feed histories.
@@ -886,28 +875,6 @@ public final class BoatMetricStore {
                 name: "HDG.true", value: cog.value, unit: cog.unit, timestamp: cog.timestamp
             )
             headingDerivedFromCOG = true
-        }
-
-        // Derive the magnetic variation whenever both true and magnetic heading
-        // are known but no variation was reported — regardless of source (device
-        // compass, NMEA 0183, NMEA 2000, Signal K…). Convention: positive = East
-        // (true north east of magnetic north). A reported `magneticVariation`
-        // always wins, since it is left untouched here.
-        if metrics["magneticVariation"] == nil,
-           !headingDerivedFromCOG,
-           let trueHeading = metrics["HDG.true"],
-           let magneticHeading = metrics["HDG.magnetic"] {
-            var variation = trueHeading.value - magneticHeading.value
-            if variation > 180 {
-                variation -= 360
-            } else if variation < -180 {
-                variation += 360
-            }
-            metrics["magneticVariation"] = BoatMetric(
-                name: "magneticVariation", value: variation, unit: "°",
-                timestamp: max(trueHeading.timestamp, magneticHeading.timestamp)
-            )
-            variationDerived = true
         }
 
         // Merge AIS targets (preserve static fields from older reports).
@@ -937,6 +904,43 @@ public final class BoatMetricStore {
         case "temperature.water":   waterTemp.add(value, at: now)
         case "pressure.atmospheric": pressure.add(value, at: now)
         default:                    break
+        }
+    }
+
+    /// Pre-fills a metric's curve history with synthetic past samples, so graphs
+    /// are populated the moment a session starts — useful for a simulator that
+    /// begins part-way through a passage. Any existing history for the metric is
+    /// replaced; the live feed then continues appending after the seeded tail.
+    ///
+    /// Samples are sorted oldest-first and fed through the same tiered buffers as
+    /// live data, so they must be spaced at least the tier's sample interval apart
+    /// (5 s for wind/SOG/COG curves, 30 min for pressure) to land as distinct
+    /// points.
+    ///
+    /// - Parameters:
+    ///   - name: The metric whose history to seed (e.g. `TWS`, `pressure.atmospheric`).
+    ///   - samples: The past `(timestamp, value)` pairs to seed.
+    public func seedHistory(name: String, samples: [(at: Date, value: Double)]) {
+        resetHistory(name: name)
+        for sample in samples.sorted(by: { $0.at < $1.at }) {
+            feedHistory(name: name, value: sample.value, at: sample.at)
+        }
+    }
+
+    /// Empties the history buffer backing a metric, so seeding starts from clean
+    /// axes without doubling up on a reconnect.
+    private func resetHistory(name: String) {
+        switch name {
+        case "TWS":                  windTWS = TieredHistory(isAngle: false)
+        case "TWD":                  windTWD = TieredHistory(isAngle: true)
+        case "AWS":                  windAWS = TieredHistory(isAngle: false)
+        case "AWA":                  windAWA = TieredHistory(isAngle: true)
+        case "SOG":                  sog = TieredHistory(isAngle: false)
+        case "COG":                  cog = TieredHistory(isAngle: true)
+        case "depth":                depthHist = TieredHistory(isAngle: false)
+        case "temperature.water":    waterTemp = TieredHistory(isAngle: false)
+        case "pressure.atmospheric": pressure = PressureHistory()
+        default:                     break
         }
     }
 

@@ -1,3 +1,7 @@
+// The NMEA transport relies on swift-nio (NIOPosix) for TCP/UDP, which does not
+// build on Windows. The entire transport is compiled out there; Signal K / NMEA
+// decoding, the simulator and the metric store remain available.
+#if !os(Windows)
 public import NIOCore
 internal import NIOPosix
 internal import Foundation
@@ -955,3 +959,5 @@ extension NMEATransport {
         return ISO8601DateFormatter().date(from: "20\(yy)-\(mo)-\(dd)T\(hh):\(mm):\(ss)Z")
     }
 }
+
+#endif  // !os(Windows)

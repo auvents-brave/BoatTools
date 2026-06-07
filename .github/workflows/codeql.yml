@@ -58,6 +58,10 @@ jobs:
         if: matrix.language == 'swift'
         run: swift --version
 
+      - name: Generate version
+        if: matrix.language == 'swift'
+        run: bash Scripts/version.sh Sources/BoatTools/Version.generated.swift
+
       - name: Build Swift package (manual)
         if: matrix.language == 'swift'
         run: swift build

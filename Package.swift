@@ -9,19 +9,39 @@ let sharedSwiftSettings: [SwiftSetting] = [
 ]
 
 var boatToolsKitDeps: [Target.Dependency] = [
-    .product(name: "NIOCore",         package: "swift-nio"),
-    .product(name: "NIOPosix",        package: "swift-nio"),
-    .product(name: "AsyncHTTPClient", package: "async-http-client"),
-    .product(name: "WebSocketKit",    package: "websocket-kit"),
-    .product(name: "Stheno",          package: "Stheno"),
+    .product(name: "Stheno",   package: "Stheno"),
+]
+
+// Executable target dependencies are assembled here (mirroring `boatToolsKitDeps`)
+// so the NIO products can be appended only on non-Windows platforms.
+var boatToolsDeps: [Target.Dependency] = [
+    "BoatToolsKit",
+    .product(name: "Stheno",         package: "Stheno"),
+    .product(name: "ArgumentParser", package: "swift-argument-parser"),
 ]
 
 var deps: [Package.Dependency] = [
-    .package(url: "https://github.com/apple/swift-nio.git",            from: "2.65.0"),
-    .package(url: "https://github.com/swift-server/async-http-client", from: "1.20.0"),
-    .package(url: "https://github.com/vapor/websocket-kit.git",        from: "2.14.0"),
-    .package(url: "https://github.com/apple/swift-argument-parser",    from: "1.3.0"),
+    .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
 ]
+
+// swift-nio (TCP/UDP networking via NIOPosix) plus the HTTP + WebSocket stack do
+// not build on Windows: NIOPosix fails against the Windows SDK, and
+// AsyncHTTPClient/WebSocketKit are not supported there either. The web-facing
+// code paths (Signal K REST/WebSocket and Victron VRM) and all NIO-based
+// transports are compiled out on Windows via `#if !os(Windows)` guards in the
+// sources. The Signal K / NMEA decoders, the simulator and the metric store
+// stay available on Windows.
+#if !os(Windows)
+deps.append(.package(url: "https://github.com/apple/swift-nio.git",            from: "2.65.0"))
+deps.append(.package(url: "https://github.com/swift-server/async-http-client", from: "1.20.0"))
+deps.append(.package(url: "https://github.com/vapor/websocket-kit.git",        from: "2.14.0"))
+boatToolsKitDeps.append(.product(name: "NIOCore",        package: "swift-nio"))
+boatToolsKitDeps.append(.product(name: "NIOPosix",       package: "swift-nio"))
+boatToolsKitDeps.append(.product(name: "AsyncHTTPClient", package: "async-http-client"))
+boatToolsKitDeps.append(.product(name: "WebSocketKit",    package: "websocket-kit"))
+boatToolsDeps.append(.product(name: "NIOCore",  package: "swift-nio"))
+boatToolsDeps.append(.product(name: "NIOPosix", package: "swift-nio"))
+#endif
 
 // Stheno: use the sibling working copy only during local development — never
 // when BoatTools is itself a checked-out dependency (its parent directory is
@@ -74,13 +94,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "BoatTools",
-            dependencies: [
-                "BoatToolsKit",
-                .product(name: "Stheno",         package: "Stheno"),
-                .product(name: "NIOCore",        package: "swift-nio"),
-                .product(name: "NIOPosix",       package: "swift-nio"),
-                .product(name: "ArgumentParser", package: "swift-argument-parser"),
-            ],
+            dependencies: boatToolsDeps,
             path: "Sources/BoatTools",
             swiftSettings: sharedSwiftSettings
         ),
