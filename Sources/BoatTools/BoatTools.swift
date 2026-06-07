@@ -1,6 +1,10 @@
 internal import Foundation
+// swift-nio (NIOPosix) does not build on Windows, so the NIO-backed subcommands
+// (`connect`, `file`, `discover`) and these imports are compiled out there.
+#if !os(Windows)
 internal import NIOCore
 internal import NIOPosix
+#endif
 internal import ArgumentParser
 internal import BoatToolsKit
 internal import Stheno
@@ -568,12 +572,21 @@ fileprivate func pollLoop(
 @main
 struct BoatToolsCLI: AsyncParsableCommand {
     static let configuration: CommandConfiguration = {
+        // The `connect`, `file` and `discover` subcommands are built on swift-nio,
+        // which does not build on Windows, so they are compiled out there. Only the
+        // `vrm` command (which reports "not yet supported" on Windows) remains.
+        #if os(Windows)
+        let subs: [any ParsableCommand.Type] = [
+            VRMCommand.self,
+        ]
+        #else
         let subs: [any ParsableCommand.Type] = [
             ConnectCommand.self,
             FileCommand.self,
             VRMCommand.self,
             DiscoverCommand.self,
         ]
+        #endif
         return CommandConfiguration(
             commandName: "boattools",
             abstract: "CLI tools to explore sailboat data sources",
@@ -631,6 +644,10 @@ fileprivate func ydRawCaptureTimestamp() -> String {
 // =============================================================================
 // MARK: - connect
 // =============================================================================
+
+// `connect`, `file` and `discover` are built on swift-nio (NMEATransport /
+// SignalKClient), which does not build on Windows; they are compiled out there.
+#if !os(Windows)
 
 struct ConnectCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
@@ -1003,6 +1020,8 @@ struct FileCommand: AsyncParsableCommand {
     }
 }
 
+#endif  // !os(Windows) — connect / file
+
 
 // =============================================================================
 // MARK: - vrm (Victron VRM cloud)
@@ -1058,6 +1077,10 @@ struct VRMCommand: AsyncParsableCommand {
 // =============================================================================
 // MARK: - discover (mDNS Bonjour — macOS/Linux)
 // =============================================================================
+
+// `discover` connects through `ConnectCommand`, which is built on swift-nio and
+// compiled out on Windows; the command is therefore unavailable there too.
+#if !os(Windows)
 
 struct DiscoverCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
@@ -1123,3 +1146,5 @@ struct DiscoverCommand: AsyncParsableCommand {
         try await cmd.run()
     }
 }
+
+#endif  // !os(Windows) — discover

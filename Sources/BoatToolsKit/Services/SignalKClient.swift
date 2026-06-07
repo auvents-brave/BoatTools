@@ -1,14 +1,15 @@
+// The Signal K client is built on swift-nio (NIOPosix) for TCP/UDP and on the
+// HTTP stack (AsyncHTTPClient / WebSocketKit) for REST and WebSocket. Neither
+// builds on Windows, so the whole client is compiled out there; the Signal K /
+// NMEA decoders that it exposes as static helpers live elsewhere and remain
+// available.
+#if !os(Windows)
 public import NIOCore
 internal import NIOPosix
 internal import Foundation
-// REST snapshots and WebSocket live streams rely on the HTTP stack, which does
-// not build on Windows. These imports and the members that use them are gated;
-// Signal K decoding and TCP/UDP streaming below remain available everywhere.
-#if !os(Windows)
 internal import AsyncHTTPClient
 internal import WebSocketKit
 internal import NIOHTTP1
-#endif
 
 
 // MARK: - SignalKClient
@@ -650,3 +651,5 @@ fileprivate final class SignalKHandlerUDP: ChannelInboundHandler, @unchecked Sen
         SignalKClient.handleText(text, emit: emit)
     }
 }
+
+#endif  // !os(Windows)
