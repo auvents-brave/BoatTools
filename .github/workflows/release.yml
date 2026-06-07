@@ -170,6 +170,11 @@ jobs:
     permissions:
       contents: read
     runs-on: windows-2022
+    # Swift 6.3.2 regressed the Windows SDK interop / strict-Sendable in swift-nio
+    # (NIOPosix). Pin the Windows toolchain to 6.3.1 until it is fixed upstream;
+    # macOS / Linux stay on the global SWIFT_VERSION.
+    env:
+      SWIFT_VERSION: "6.3.1"
     steps:
       - uses: actions/checkout@v6
 
