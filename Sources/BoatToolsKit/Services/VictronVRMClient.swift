@@ -1,12 +1,4 @@
-// The Victron VRM client is built entirely on the HTTP stack (AsyncHTTPClient),
-// which does not build on Windows. The whole client is therefore compiled out
-// there; the `vrm` CLI command prints a "not yet supported" notice instead.
-#if !os(Windows)
-public import NIOCore
 internal import Foundation
-internal import AsyncHTTPClient
-internal import NIOPosix
-
 
 // MARK: - VictronVRMClient
 
@@ -16,405 +8,408 @@ internal import NIOPosix
 /// (`vrmapi.victronenergy.com`). All requests are authenticated with a personal
 /// access token via the `X-Authorization` header.
 ///
-/// No mutable state — `@unchecked Sendable` is safe here.
-public final class VictronVRMClient: @unchecked Sendable {
+/// Built on the portable transport layer (``NetworkStack``), so the client is available
+/// on every supported platform, Windows included. No mutable state.
+public final class VictronVRMClient: Sendable {
 
-    // MARK: Config
+	// MARK: Config
 
-    /// Authentication and endpoint configuration.
-    public struct Config: Sendable {
-        /// Personal access token from the VRM portal.
-        public let accessToken: String
-        /// VRM API base URL. Override for staging/testing environments.
-        public var baseURL: String = "https://vrmapi.victronenergy.com/v2"
+	/// Authentication and endpoint configuration.
+	public struct Config: Sendable {
+		/// Personal access token from the VRM portal.
+		public let accessToken: String
+		/// VRM API base URL. Override for staging/testing environments.
+		public var baseURL: String = "https://vrmapi.victronenergy.com/v2"
 
-        /// Creates a VRM client configuration with a personal access token.
-        public init(accessToken: String) { self.accessToken = accessToken }
-    }
+		/// Creates a VRM client configuration with a personal access token.
+		public init(accessToken: String) { self.accessToken = accessToken }
+	}
 
-    // MARK: Data types
+	// MARK: Data types
 
-    /// A Victron installation (site) from a VRM user account.
-    public struct Installation: Sendable, Decodable {
-        /// Unique site identifier.
-        public let idSite: Int
-        /// Human-readable site name.
-        public let name: String
-        /// Whether the authenticated user owns this installation.
-        public let owner: Bool?
-    }
+	/// A Victron installation (site) from a VRM user account.
+	public struct Installation: Sendable, Decodable {
+		/// Unique site identifier.
+		public let idSite: Int
+		/// Human-readable site name.
+		public let name: String
+		/// Whether the authenticated user owns this installation.
+		public let owner: Bool?
+	}
 
-    /// A single diagnostic reading from a VRM site.
-    public struct DiagnosticRecord: Sendable, Decodable {
-        /// VRM data attribute identifier.
-        public let idDataAttribute: Int?
-        /// Human-readable measurement name (e.g. `"Battery voltage"`).
-        public let description: String?
-        /// Pre-formatted value string including unit (e.g. `"26.2 V"`).
-        public let formattedValue: String?
-        /// Raw numeric value.
-        public let rawValue: Double?
-        /// Physical device name (e.g. `"Battery Monitor"`, `"MPPT"`, `"Gateway"`).
-        ///
-        /// The VRM JSON uses a capitalised `Device` key.
-        public let device: String?
-        /// Device instance index when multiple identical devices exist (0, 1, 2, …).
-        public let instance: Int?
-        /// printf-style format string with unit (e.g. `"%.1f V"`, `"%.0f %%"`).
-        public let formatWithUnit: String?
+	/// A single diagnostic reading from a VRM site.
+	public struct DiagnosticRecord: Sendable, Decodable {
+		/// VRM data attribute identifier.
+		public let idDataAttribute: Int?
+		/// Human-readable measurement name (e.g. `"Battery voltage"`).
+		public let description: String?
+		/// Pre-formatted value string including unit (e.g. `"26.2 V"`).
+		public let formattedValue: String?
+		/// Raw numeric value.
+		public let rawValue: Double?
+		/// Physical device name (e.g. `"Battery Monitor"`, `"MPPT"`, `"Gateway"`).
+		///
+		/// The VRM JSON uses a capitalised `Device` key.
+		public let device: String?
+		/// Device instance index when multiple identical devices exist (0, 1, 2, …).
+		public let instance: Int?
+		/// printf-style format string with unit (e.g. `"%.1f V"`, `"%.0f %%"`).
+		public let formatWithUnit: String?
 
-        enum K: String, CodingKey {
-            case idDataAttribute, description, formattedValue, rawValue
-            case device = "Device"
-            case instance, formatWithUnit
-        }
+		enum K: String, CodingKey {
+			case idDataAttribute, description, formattedValue, rawValue
+			case device = "Device"
+			case instance, formatWithUnit
+		}
 
-        public init(from decoder: any Decoder) throws {
-            let c = try decoder.container(keyedBy: K.self)
-            idDataAttribute = try? c.decodeIfPresent(Int.self,    forKey: .idDataAttribute)
-            description     = try? c.decodeIfPresent(String.self, forKey: .description)
-            formattedValue  = try? c.decodeIfPresent(String.self, forKey: .formattedValue)
-            if let d = try? c.decodeIfPresent(Double.self, forKey: .rawValue) {
-                rawValue = d
-            } else if let s = try? c.decodeIfPresent(String.self, forKey: .rawValue) {
-                rawValue = Double(s)
-            } else {
-                rawValue = nil
-            }
-            device          = try? c.decodeIfPresent(String.self, forKey: .device)
-            instance        = try? c.decodeIfPresent(Int.self,    forKey: .instance)
-            formatWithUnit  = try? c.decodeIfPresent(String.self, forKey: .formatWithUnit)
-        }
+		public init(from decoder: any Decoder) throws {
+			let c = try decoder.container(keyedBy: K.self)
+			idDataAttribute = try? c.decodeIfPresent(Int.self, forKey: .idDataAttribute)
+			description = try? c.decodeIfPresent(String.self, forKey: .description)
+			formattedValue = try? c.decodeIfPresent(String.self, forKey: .formattedValue)
+			if let d = try? c.decodeIfPresent(Double.self, forKey: .rawValue) {
+				rawValue = d
+			} else if let s = try? c.decodeIfPresent(String.self, forKey: .rawValue) {
+				rawValue = Double(s)
+			} else {
+				rawValue = nil
+			}
+			device = try? c.decodeIfPresent(String.self, forKey: .device)
+			instance = try? c.decodeIfPresent(Int.self, forKey: .instance)
+			formatWithUnit = try? c.decodeIfPresent(String.self, forKey: .formatWithUnit)
+		}
 
-        /// Human-readable device label including instance index,
-        /// e.g. `"Battery Monitor [0]"` or `"MPPT [1]"`. Empty when device is unknown.
-        public var deviceTag: String {
-            guard let dev = device else { return "" }
-            if let inst = instance { return "\(dev) [\(inst)]" }
-            return dev
-        }
+		/// Human-readable device label including instance index,
+		/// e.g. `"Battery Monitor [0]"` or `"MPPT [1]"`. Empty when device is unknown.
+		public var deviceTag: String {
+			guard let dev = device else { return "" }
+			if let inst = instance { return "\(dev) [\(inst)]" }
+			return dev
+		}
 
-        /// Unit string extracted from ``formatWithUnit`` by stripping the printf specifier.
-        ///
-        /// `"%.1f V"` → `"V"`, `"%.0f %%"` → `"%"`, `nil` when no unit is present.
-        public var unit: String? {
-            guard let f = formatWithUnit, !f.isEmpty else { return nil }
-            var s = f
-            if let r = s.range(
-                of: #"%[-+ #0]*[0-9]*\.?[0-9]*[lhLqjzt]*[diouxXeEfFgGsaAcCpn%]"#,
-                options: .regularExpression
-            ) { s.removeSubrange(r) }
-            s = s.trimmingCharacters(in: .whitespaces)
-                 .replacingOccurrences(of: "%%", with: "%")
-            return s.isEmpty ? nil : s
-        }
-    }
+		/// Unit string extracted from ``formatWithUnit`` by stripping the printf specifier.
+		///
+		/// `"%.1f V"` → `"V"`, `"%.0f %%"` → `"%"`, `nil` when no unit is present.
+		public var unit: String? {
+			guard let f = formatWithUnit, !f.isEmpty else { return nil }
+			var s = f
+			if let r = s.range(
+				of: #"%[-+ #0]*[0-9]*\.?[0-9]*[lhLqjzt]*[diouxXeEfFgGsaAcCpn%]"#,
+				options: .regularExpression
+			) {
+				s.removeSubrange(r)
+			}
+			s = s.trimmingCharacters(in: .whitespaces)
+				.replacingOccurrences(of: "%%", with: "%")
+			return s.isEmpty ? nil : s
+		}
+	}
 
-    // MARK: Init / shutdown
+	// MARK: Init / shutdown
 
-    private let config: Config
-    private let httpClient: HTTPClient
+	private let config: Config
+	private let http: any HTTPTransport
 
-    /// Creates a VRM client.
-    ///
-    /// - Parameters:
-    ///   - config: Authentication and base URL configuration.
-    ///   - eventLoopGroup: Shared NIO event loop group.
-    public init(config: Config, eventLoopGroup: any EventLoopGroup) {
-        self.config     = config
-        self.httpClient = HTTPClient(eventLoopGroupProvider: .shared(eventLoopGroup))
-    }
+	/// Creates a VRM client.
+	///
+	/// - Parameter config: Authentication and base URL configuration.
+	public init(config: Config) {
+		self.config = config
+		self.http = NetworkStack.makeHTTPTransport()
+	}
 
-    /// Shuts down the underlying HTTP client.
-    public func shutdown() async throws {
-        try await httpClient.shutdown()
-    }
+	/// Shuts down the underlying HTTP transport.
+	public func shutdown() async throws {
+		try await http.shutdown()
+	}
 
-    // MARK: API
+	// MARK: API
 
-    /// Lists all installations attached to a VRM user account.
-    ///
-    /// - Parameter userId: The VRM numeric user ID.
-    public func installations(userId: Int) async throws -> [Installation] {
-        struct W: Decodable { let records: [Installation] }
-        let w: W = try await get(path: "/users/\(userId)/installations")
-        return w.records
-    }
+	/// Lists all installations attached to a VRM user account.
+	///
+	/// - Parameter userId: The VRM numeric user ID.
+	public func installations(userId: Int) async throws -> [Installation] {
+		struct W: Decodable { let records: [Installation] }
+		let w: W = try await get(path: "/users/\(userId)/installations")
+		return w.records
+	}
 
-    /// Lists the installations (sites) for a VRM account, managing the network
-    /// event loop internally so callers need no NIO — handy for a settings
-    /// "check connection" step.
-    ///
-    /// - Parameters:
-    ///   - accessToken: VRM personal access token.
-    ///   - userId: VRM numeric user (owner) ID.
-    /// - Returns: The account's installations.
-    public static func installations(accessToken: String, userId: Int) async throws -> [Installation] {
-        let client = VictronVRMClient(
-            config: .init(accessToken: accessToken),
-            eventLoopGroup: MultiThreadedEventLoopGroup.singleton
-        )
-        do {
-            let result = try await client.installations(userId: userId)
-            try? await client.shutdown()
-            return result
-        } catch {
-            try? await client.shutdown()
-            throw error
-        }
-    }
+	/// Lists the installations (sites) for a VRM account, managing the HTTP
+	/// transport internally — handy for a settings "check connection" step.
+	///
+	/// - Parameters:
+	///   - accessToken: VRM personal access token.
+	///   - userId: VRM numeric user (owner) ID.
+	/// - Returns: The account's installations.
+	public static func installations(accessToken: String, userId: Int) async throws -> [Installation] {
+		let client = VictronVRMClient(config: .init(accessToken: accessToken))
+		do {
+			let result = try await client.installations(userId: userId)
+			try? await client.shutdown()
+			return result
+		} catch {
+			try? await client.shutdown()
+			throw error
+		}
+	}
 
-    /// Fetches the latest diagnostic records for a site.
-    ///
-    /// - Parameter siteId: The VRM site (installation) ID.
-    public func diagnostics(siteId: Int) async throws -> [DiagnosticRecord] {
-        struct W: Decodable { let records: [DiagnosticRecord] }
-        let w: W = try await get(path: "/installations/\(siteId)/diagnostics")
-        return w.records
-    }
+	/// Fetches the latest diagnostic records for a site.
+	///
+	/// - Parameter siteId: The VRM site (installation) ID.
+	public func diagnostics(siteId: Int) async throws -> [DiagnosticRecord] {
+		struct W: Decodable { let records: [DiagnosticRecord] }
+		let w: W = try await get(path: "/installations/\(siteId)/diagnostics")
+		return w.records
+	}
 
-    /// Returns all available measurements for a site as ``BoatMetric`` values.
-    ///
-    /// Maps each ``DiagnosticRecord`` with a numeric ``DiagnosticRecord/rawValue``
-    /// and a non-nil ``DiagnosticRecord/description`` into a ``BoatMetric``.
-    /// The metric name combines the device tag and description,
-    /// e.g. `"Battery Monitor [0] — Battery voltage"`.
-    ///
-    /// - Parameter siteId: The VRM site ID.
-    public func metrics(siteId: Int) async throws -> [BoatMetric] {
-        let records = try await diagnostics(siteId: siteId)
-        return records.compactMap { r in
-            guard let n = r.description else { return nil }
-            let v: Double
-            if let raw = r.rawValue {
-                v = raw
-            } else if let derived = Self.booleanValue(description: n, formatted: r.formattedValue) {
-                v = derived
-            } else {
-                return nil
-            }
-            // Map the common Victron devices/measurements onto the canonical
-            // metric names so the rest of the app (instruments, etc.) recognises
-            // them. Anything unmapped keeps its human-readable name.
-            if let canonical = Self.canonicalName(device: r.device, description: n, instance: r.instance) {
-                // VRM reports latitude/longitude with "LAT"/"LNG" units; normalise.
-                let unit = (canonical == "lat" || canonical == "lon") ? "°" : r.unit
-                return BoatMetric(name: canonical, value: v, unit: unit)
-            }
-            let tag = r.deviceTag
-            let fullName = tag.isEmpty ? n : "\(tag) — \(n)"
-            return BoatMetric(name: fullName, value: v, unit: r.unit)
-        }
-    }
+	/// Returns all available measurements for a site as ``BoatMetric`` values.
+	///
+	/// Maps each ``DiagnosticRecord`` with a numeric ``DiagnosticRecord/rawValue``
+	/// and a non-nil ``DiagnosticRecord/description`` into a ``BoatMetric``.
+	/// The metric name combines the device tag and description,
+	/// e.g. `"Battery Monitor [0] — Battery voltage"`.
+	///
+	/// - Parameter siteId: The VRM site ID.
+	public func metrics(siteId: Int) async throws -> [BoatMetric] {
+		let records = try await diagnostics(siteId: siteId)
+		return records.compactMap { r in
+			guard let n = r.description else { return nil }
+			let v: Double
+			if let raw = r.rawValue {
+				v = raw
+			} else if let derived = Self.booleanValue(description: n, formatted: r.formattedValue) {
+				v = derived
+			} else {
+				return nil
+			}
+			// Map the common Victron devices/measurements onto the canonical
+			// metric names so the rest of the app (instruments, etc.) recognises
+			// them. Anything unmapped keeps its human-readable name.
+			if let canonical = Self.canonicalName(device: r.device, description: n, instance: r.instance) {
+				// VRM reports latitude/longitude with "LAT"/"LNG" units; normalise.
+				let unit = (canonical == "lat" || canonical == "lon") ? "°" : r.unit
+				return BoatMetric(name: canonical, value: v, unit: unit)
+			}
+			let tag = r.deviceTag
+			let fullName = tag.isEmpty ? n : "\(tag) — \(n)"
+			return BoatMetric(name: fullName, value: v, unit: r.unit)
+		}
+	}
 
-    /// Maps a VRM (device, description, instance) to a canonical metric name.
-    /// For a recognised device, *every* numeric measurement nests under the
-    /// device's canonical prefix (`battery.0.`, `tank.23.`…) — mapped readings
-    /// get tidy leaves, the rest are slugged — so a pill's detail can show the
-    /// whole device. Unknown devices return `nil` (kept human-readable).
-    static func canonicalName(device: String?, description: String, instance: Int?) -> String? {
-        let i = instance ?? 0
-        let d = description.lowercased()
-        let dev = (device ?? "").lowercased()
+	/// Maps a VRM (device, description, instance) to a canonical metric name.
+	/// For a recognised device, *every* numeric measurement nests under the
+	/// device's canonical prefix (`battery.0.`, `tank.23.`…) — mapped readings
+	/// get tidy leaves, the rest are slugged — so a pill's detail can show the
+	/// whole device. Unknown devices return `nil` (kept human-readable).
+	static func canonicalName(device: String?, description: String, instance: Int?) -> String? {
+		let i = instance ?? 0
+		let d = description.lowercased()
+		let dev = (device ?? "").lowercased()
 
-        // The gateway carries the boat's position (plus system settings we leave
-        // alone).
-        if dev.contains("gateway") {
-            switch d {
-            case "latitude":  return "lat"
-            case "longitude": return "lon"
-            default:          return nil
-            }
-        }
+		// The gateway carries the boat's position (plus system settings we leave
+		// alone).
+		if dev.contains("gateway") {
+			switch d {
+			case "latitude": return "lat"
+			case "longitude": return "lon"
+			default: return nil
+			}
+		}
 
-        let prefix: String
-        if dev.contains("battery monitor") || dev.contains("smartshunt") || dev.contains("bmv") { prefix = "battery" }
-        else if dev.contains("solar charger") || dev.contains("mppt") { prefix = "solar" }
-        else if dev.contains("tank") { prefix = "tank" }
-        else if dev.contains("ve.bus") { prefix = "vebus" }
-        else if dev.contains("system overview") { prefix = "system" }
-        else { return nil }
+		let prefix: String
+		if dev.contains("battery monitor") || dev.contains("smartshunt") || dev.contains("bmv") {
+			prefix = "battery"
+		} else if dev.contains("solar charger") || dev.contains("mppt") {
+			prefix = "solar"
+		} else if dev.contains("tank") {
+			prefix = "tank"
+		} else if dev.contains("ve.bus") {
+			prefix = "vebus"
+		} else if dev.contains("system overview") {
+			prefix = "system"
+		} else {
+			return nil
+		}
 
-        return "\(prefix).\(i).\(mappedLeaf(prefix: prefix, description: d) ?? slug(description))"
-    }
+		return "\(prefix).\(i).\(mappedLeaf(prefix: prefix, description: d) ?? slug(description))"
+	}
 
-    /// A tidy canonical leaf for a recognised measurement, or `nil` to slug it.
-    private static func mappedLeaf(prefix: String, description d: String) -> String? {
-        switch (prefix, d) {
-        case ("battery", "voltage"):                          return "voltage"
-        case ("battery", "current"):                          return "current"
-        case ("battery", "battery temperature"):              return "temperature"
-        case ("battery", "state of charge"):                  return "soc"
-        case ("battery", "consumed amphours"):                return "consumedAh"
-        case ("battery", "time to go"):                       return "timeToGo"
-        case ("battery", "starter battery voltage"):          return "starterVoltage"
-        case ("battery", "capacity"):                         return "capacity"
-        case ("solar", "voltage"):                            return "voltage"
-        case ("solar", "current"):                            return "current"
-        case ("solar", "pv voltage"):                         return "pvVoltage"
-        case ("solar", "pv power"):                           return "pvPower"
-        case ("solar", "battery watts"):                      return "power"
-        case ("solar", "yield today"):                        return "yieldToday"
-        case ("tank", "tank level"), ("tank", "level"):       return "level"
-        case ("tank", "tank capacity"), ("tank", "capacity"): return "capacity"
-        case ("vebus", "active input current limit"):         return "activeInputCurrentLimit"
-        case ("vebus", "ac input 1 current limit"):           return "input1CurrentLimit"
-        case ("vebus", "ac input 2 current limit"):           return "input2CurrentLimit"
-        case ("system", "ac input 1 connected"):              return "input1Connected"
-        case ("system", "ac input 2 connected"):              return "input2Connected"
-        default:                                              return nil
-        }
-    }
+	/// A tidy canonical leaf for a recognised measurement, or `nil` to slug it.
+	private static func mappedLeaf(prefix: String, description d: String) -> String? {
+		switch (prefix, d) {
+		case ("battery", "voltage"): return "voltage"
+		case ("battery", "current"): return "current"
+		case ("battery", "battery temperature"): return "temperature"
+		case ("battery", "state of charge"): return "soc"
+		case ("battery", "consumed amphours"): return "consumedAh"
+		case ("battery", "time to go"): return "timeToGo"
+		case ("battery", "starter battery voltage"): return "starterVoltage"
+		case ("battery", "capacity"): return "capacity"
+		case ("solar", "voltage"): return "voltage"
+		case ("solar", "current"): return "current"
+		case ("solar", "pv voltage"): return "pvVoltage"
+		case ("solar", "pv power"): return "pvPower"
+		case ("solar", "battery watts"): return "power"
+		case ("solar", "yield today"): return "yieldToday"
+		case ("tank", "tank level"), ("tank", "level"): return "level"
+		case ("tank", "tank capacity"), ("tank", "capacity"): return "capacity"
+		case ("vebus", "active input current limit"): return "activeInputCurrentLimit"
+		case ("vebus", "ac input 1 current limit"): return "input1CurrentLimit"
+		case ("vebus", "ac input 2 current limit"): return "input2CurrentLimit"
+		case ("system", "ac input 1 connected"): return "input1Connected"
+		case ("system", "ac input 2 connected"): return "input2Connected"
+		default: return nil
+		}
+	}
 
-    /// A dot-free camelCase leaf from a description ("Tank fluid type" →
-    /// "tankFluidType"), so unmapped numeric readings still nest under the device.
-    private static func slug(_ description: String) -> String {
-        let words = description.split { !$0.isLetter && !$0.isNumber }
-        guard let first = words.first else { return "value" }
-        return words.dropFirst().reduce(String(first).lowercased()) {
-            $0 + $1.prefix(1).uppercased() + $1.dropFirst().lowercased()
-        }
-    }
+	/// A dot-free camelCase leaf from a description ("Tank fluid type" →
+	/// "tankFluidType"), so unmapped numeric readings still nest under the device.
+	private static func slug(_ description: String) -> String {
+		let words = description.split { !$0.isLetter && !$0.isNumber }
+		guard let first = words.first else { return "value" }
+		return words.dropFirst().reduce(String(first).lowercased()) {
+			$0 + $1.prefix(1).uppercased() + $1.dropFirst().lowercased()
+		}
+	}
 
-    /// A 0/1 value for boolean-style measurements whose raw value is text
-    /// ("Connected" / "Not connected"). Only applied to "connected" fields so it
-    /// doesn't flood the feed with every status flag.
-    static func booleanValue(description: String, formatted: String?) -> Double? {
-        guard description.lowercased().contains("connected"),
-              let f = formatted?.lowercased() else { return nil }
-        if f.contains("not") || f.contains("disconnected") { return 0 }
-        if f.contains("connected") { return 1 }
-        return nil
-    }
+	/// A 0/1 value for boolean-style measurements whose raw value is text
+	/// ("Connected" / "Not connected"). Only applied to "connected" fields so it
+	/// doesn't flood the feed with every status flag.
+	static func booleanValue(description: String, formatted: String?) -> Double? {
+		guard description.lowercased().contains("connected"),
+			let f = formatted?.lowercased()
+		else { return nil }
+		if f.contains("not") || f.contains("disconnected") { return 0 }
+		if f.contains("connected") { return 1 }
+		return nil
+	}
 
-    /// Fetches custom device names for a site, keyed by canonical metric prefix
-    /// (e.g. `"battery.0"` → `"Lynx 24"`), so instruments can show meaningful
-    /// labels. A one-shot call — custom names rarely change.
-    public static func labels(accessToken: String, siteId: Int) async throws -> [String: String] {
-        let client = VictronVRMClient(
-            config: .init(accessToken: accessToken),
-            eventLoopGroup: MultiThreadedEventLoopGroup.singleton
-        )
-        // The HTTP client must be shut down before it deinits, even on throw.
-        let records: [DiagnosticRecord]
-        do {
-            records = try await client.diagnostics(siteId: siteId)
-        } catch {
-            try? await client.shutdown()
-            throw error
-        }
-        try? await client.shutdown()
-        var result: [String: String] = [:]
-        for record in records {
-            guard let name = record.formattedValue, !name.isEmpty,
-                  let key = labelKey(device: record.device, description: record.description, instance: record.instance)
-            else { continue }
-            result[key] = name
-        }
-        return result
-    }
+	/// Fetches custom device names for a site, keyed by canonical metric prefix
+	/// (e.g. `"battery.0"` → `"Lynx 24"`), so instruments can show meaningful
+	/// labels. A one-shot call — custom names rarely change.
+	public static func labels(accessToken: String, siteId: Int) async throws -> [String: String] {
+		let client = VictronVRMClient(config: .init(accessToken: accessToken))
+		// The HTTP transport must be released before the client goes away, even on throw.
+		let records: [DiagnosticRecord]
+		do {
+			records = try await client.diagnostics(siteId: siteId)
+		} catch {
+			try? await client.shutdown()
+			throw error
+		}
+		try? await client.shutdown()
+		var result: [String: String] = [:]
+		for record in records {
+			guard let name = record.formattedValue, !name.isEmpty,
+				let key = labelKey(
+					device: record.device, description: record.description, instance: record.instance)
+			else { continue }
+			result[key] = name
+		}
+		return result
+	}
 
-    private static func labelKey(device: String?, description: String?, instance: Int?) -> String? {
-        guard let d = description?.lowercased() else { return nil }
-        let i = instance ?? 0
-        let dev = (device ?? "").lowercased()
-        if d == "battery custom name", dev.contains("battery monitor") || dev.contains("smartshunt") { return "battery.\(i)" }
-        if d == "solar charger custom name" { return "solar.\(i)" }
-        if d == "tank custom name" { return "tank.\(i)" }
-        return nil
-    }
+	private static func labelKey(device: String?, description: String?, instance: Int?) -> String? {
+		guard let d = description?.lowercased() else { return nil }
+		let i = instance ?? 0
+		let dev = (device ?? "").lowercased()
+		if d == "battery custom name", dev.contains("battery monitor") || dev.contains("smartshunt") {
+			return "battery.\(i)"
+		}
+		if d == "solar charger custom name" { return "solar.\(i)" }
+		if d == "tank custom name" { return "tank.\(i)" }
+		return nil
+	}
 
-    /// Continuously polls a VRM site and yields each batch as ``NMEAFrame``
-    /// values, making the client directly compatible with ``BoatMetricStore``.
-    ///
-    /// Each poll fetches all site metrics and yields one ``NMEAFrame/metric(_:)``
-    /// per value. Between polls the stream suspends for `pollInterval`.
-    ///
-    /// Use with ``BoatMetricStore/pipeSignalK(_:)`` so VRM values receive the
-    /// lowest source priority (NMEA 0183 and NMEA 2000 sources win if present):
-    ///
-    /// ```swift
-    /// store.pipeSignalK(vrmClient.frameStream(siteId: id, pollInterval: .seconds(60)))
-    /// ```
-    ///
-    /// The stream ends when cancelled or when a network error occurs.
-    ///
-    /// - Parameters:
-    ///   - siteId: VRM site (installation) identifier.
-    ///   - pollInterval: Delay between consecutive polls. Defaults to 60 seconds.
-    public func frameStream(
-        siteId: Int,
-        pollInterval: Duration = .seconds(60)
-    ) -> AsyncThrowingStream<NMEAFrame, any Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    while !Task.isCancelled {
-                        let batch = try await self.metrics(siteId: siteId)
-                        for m in batch { continuation.yield(.metric(m)) }
-                        // A non-positive interval means snapshot-only: poll once.
-                        if pollInterval <= .zero { break }
-                        try await Task.sleep(for: pollInterval)
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { @Sendable _ in task.cancel() }
-        }
-    }
+	/// Continuously polls a VRM site and yields each batch as ``NMEAFrame``
+	/// values, making the client directly compatible with ``BoatMetricStore``.
+	///
+	/// Each poll fetches all site metrics and yields one ``NMEAFrame/metric(_:)``
+	/// per value. Between polls the stream suspends for `pollInterval`.
+	///
+	/// Use with ``BoatMetricStore/pipeSignalK(_:)`` so VRM values receive the
+	/// lowest source priority (NMEA 0183 and NMEA 2000 sources win if present):
+	///
+	/// ```swift
+	/// store.pipeSignalK(vrmClient.frameStream(siteId: id, pollInterval: .seconds(60)))
+	/// ```
+	///
+	/// The stream ends when cancelled or when a network error occurs.
+	///
+	/// - Parameters:
+	///   - siteId: VRM site (installation) identifier.
+	///   - pollInterval: Delay between consecutive polls. Defaults to 60 seconds.
+	public func frameStream(
+		siteId: Int,
+		pollInterval: Duration = .seconds(60)
+	) -> AsyncThrowingStream<NMEAFrame, any Error> {
+		AsyncThrowingStream { continuation in
+			let task = Task {
+				do {
+					while !Task.isCancelled {
+						let batch = try await self.metrics(siteId: siteId)
+						for m in batch { continuation.yield(.metric(m)) }
+						// A non-positive interval means snapshot-only: poll once.
+						if pollInterval <= .zero { break }
+						try await Task.sleep(for: pollInterval)
+					}
+					continuation.finish()
+				} catch {
+					continuation.finish(throwing: error)
+				}
+			}
+			continuation.onTermination = { @Sendable _ in task.cancel() }
+		}
+	}
 
-    /// Polls a VRM site as ``NMEAFrame`` values, managing the network event loop
-    /// internally so callers need no NIO. The returned stream retains the client
-    /// for its lifetime. Pipe with ``BoatMetricStore/pipeSignalK(_:)``.
-    ///
-    /// - Parameters:
-    ///   - accessToken: VRM personal access token.
-    ///   - siteId: VRM site (installation) identifier.
-    ///   - pollInterval: Delay between consecutive polls. Defaults to 60 seconds.
-    public static func frameStream(
-        accessToken: String,
-        siteId: Int,
-        pollInterval: Duration = .seconds(60)
-    ) -> AsyncThrowingStream<NMEAFrame, any Error> {
-        let client = VictronVRMClient(
-            config: .init(accessToken: accessToken),
-            eventLoopGroup: MultiThreadedEventLoopGroup.singleton
-        )
-        let inner = client.frameStream(siteId: siteId, pollInterval: pollInterval)
-        return AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    for try await frame in inner { continuation.yield(frame) }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-                // Shut the HTTP client down before it deinits (or it traps).
-                try? await client.shutdown()
-            }
-            continuation.onTermination = { @Sendable _ in task.cancel() }
-        }
-    }
+	/// Polls a VRM site as ``NMEAFrame`` values, managing the HTTP transport
+	/// internally. The returned stream retains the client for its lifetime.
+	/// Pipe with ``BoatMetricStore/pipeSignalK(_:)``.
+	///
+	/// - Parameters:
+	///   - accessToken: VRM personal access token.
+	///   - siteId: VRM site (installation) identifier.
+	///   - pollInterval: Delay between consecutive polls. Defaults to 60 seconds.
+	public static func frameStream(
+		accessToken: String,
+		siteId: Int,
+		pollInterval: Duration = .seconds(60)
+	) -> AsyncThrowingStream<NMEAFrame, any Error> {
+		let client = VictronVRMClient(config: .init(accessToken: accessToken))
+		let inner = client.frameStream(siteId: siteId, pollInterval: pollInterval)
+		return AsyncThrowingStream { continuation in
+			let task = Task {
+				do {
+					for try await frame in inner { continuation.yield(frame) }
+					continuation.finish()
+				} catch {
+					continuation.finish(throwing: error)
+				}
+				// Shut the HTTP client down before it deinits (or it traps).
+				try? await client.shutdown()
+			}
+			continuation.onTermination = { @Sendable _ in task.cancel() }
+		}
+	}
 
-    // MARK: Private
+	// MARK: Private
 
-    private func get<T: Decodable & Sendable>(path: String) async throws -> T {
-        let url = config.baseURL + path
-        var req = HTTPClientRequest(url: url)
-        req.headers.add(name: "X-Authorization", value: "Token \(config.accessToken)")
-        req.headers.add(name: "Accept",           value: "application/json")
-        let resp = try await httpClient.execute(req, timeout: .seconds(15))
-        let data = try await resp.body.collect(upTo: 10 * 1024 * 1024)
-        guard (200..<300).contains(resp.status.code) else {
-            throw BoatCloudError.http(status: resp.status.code, body: String(buffer: data))
-        }
-        do {
-            return try JSONDecoder().decode(T.self, from: Data(buffer: data))
-        } catch {
-            throw BoatCloudError.decoding("\(error)")
-        }
-    }
+	private func get<T: Decodable & Sendable>(path: String) async throws -> T {
+		let request = HTTPRequest(
+			url: config.baseURL + path,
+			headers: [
+				(name: "X-Authorization", value: "Token \(config.accessToken)"),
+				(name: "Accept", value: "application/json"),
+			])
+		let response = try await http.execute(request)
+		guard (200..<300).contains(response.status) else {
+			throw BoatCloudError.http(
+				status: response.status, body: String(bytes: response.body, encoding: .utf8))
+		}
+		do {
+			return try JSONDecoder().decode(T.self, from: Data(response.body))
+		} catch {
+			throw BoatCloudError.decoding("\(error)")
+		}
+	}
 }
-#endif

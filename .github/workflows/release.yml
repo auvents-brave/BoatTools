@@ -162,20 +162,16 @@ jobs:
             boattools-linux-x86_64.tar.gz.sha256
 
   # Windows is a development-only artefact: it ships with the rolling "latest"
-  # lab build, never with a tagged release (which stays macOS + Linux). The web
-  # stack is compiled out on Windows, so the binary covers TCP/UDP and decoding.
+  # lab build, never with a tagged release (which stays macOS + Linux). libcurl
+  # and zlib are linked statically (vcpkg static-md triplet), and the zip
+  # bundles the Swift runtime DLLs next to the exe, so it runs on machines
+  # with no Swift toolchain installed.
   build-windows:
     name: Build (windows)
     if: github.ref_type != 'tag'
     permissions:
       contents: read
     runs-on: windows-2022
-    # Swift 6.3.x's stricter Sendable checking + Windows SDK interop break the
-    # swift-nio Windows build (NIOPosix: NIOThread / IPPROTO). Pin the Windows
-    # toolchain to the last 6.1 release, where it still builds; macOS / Linux stay
-    # on the global SWIFT_VERSION. Lift once swift-nio's Windows support catches up.
-    env:
-      SWIFT_VERSION: "6.1.3"
     steps:
       - uses: actions/checkout@v6
 
@@ -184,22 +180,47 @@ jobs:
           branch: swift-${{ env.SWIFT_VERSION }}-release
           tag: ${{ env.SWIFT_VERSION }}-RELEASE
 
+      - name: Cache vcpkg-built libcurl
+        uses: actions/cache@v4
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-curl-websockets-x64-windows-static-md-v1
+
+      - name: Install libcurl (websockets feature, static)
+        run: vcpkg install curl[websockets]:x64-windows-static-md
+
       - name: Generate version
         shell: bash
         run: bash Scripts/version.sh Sources/BoatTools/Version.generated.swift
 
       - name: Build
-        shell: bash
-        run: |
-          set -euo pipefail
+        run: >-
           swift build -c release
-          echo "BINDIR=$(swift build -c release --show-bin-path)" >> "$GITHUB_ENV"
+          -Xcc "-I$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows-static-md\include"
+          -Xlinker "/LIBPATH:$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows-static-md\lib"
 
       - name: Package
         shell: pwsh
         run: |
+          # A Swift executable loads the Swift runtime DLLs dynamically;
+          # end-user machines have no Swift toolchain, so bundle them.
+          # gha-setup-swift installs per-user (%LocalAppData%\Programs\Swift);
+          # the machine-wide Program Files location is kept as a fallback.
+          $runtimeBin = @(
+            "$env:LOCALAPPDATA\Programs\Swift\Runtimes\*\usr\bin",
+            "$env:ProgramFiles\Swift\Runtimes\*\usr\bin"
+          ) | ForEach-Object { Resolve-Path $_ -ErrorAction SilentlyContinue } |
+            Select-Object -ExpandProperty Path -First 1
+          if (-not $runtimeBin) {
+            Write-Error "Swift runtime DLL directory not found"
+            exit 1
+          }
+          Write-Host "Bundling Swift runtime from $runtimeBin"
+          New-Item -ItemType Directory pkg | Out-Null
+          Copy-Item ".build\release\boattools.exe" pkg\
+          Copy-Item "$runtimeBin\*.dll" pkg\
           $asset = "boattools-windows-x86_64.zip"
-          Compress-Archive -Path "$env:BINDIR\boattools.exe" -DestinationPath $asset -Force
+          Compress-Archive -Path pkg\* -DestinationPath $asset -Force
           ((Get-FileHash $asset -Algorithm SHA256).Hash.ToLower() + "  " + $asset) |
             Out-File -Encoding ascii "$asset.sha256"
 

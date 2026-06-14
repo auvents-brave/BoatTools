@@ -1,0 +1,18 @@
+module CCurl [system] {
+    header "shim.h"
+    // Static libcurl (vcpkg triplet x64-windows-static-md) and what it links
+    // against: zlib (vcpkg) plus the Windows system libraries used by the
+    // Schannel TLS backend. The system import libraries always ship with the
+    // Windows SDK, so listing them unconditionally is safe.
+    // zlib ≥ 1.3.2 names its static Windows library zs.lib (the "s" suffix
+    // comes from upstream CMake; vcpkg no longer renames it to zlib.lib).
+    link "libcurl"
+    link "zs"
+    link "ws2_32"
+    link "crypt32"
+    link "secur32"
+    link "bcrypt"
+    link "advapi32"
+    link "wldap32"
+    export *
+}
