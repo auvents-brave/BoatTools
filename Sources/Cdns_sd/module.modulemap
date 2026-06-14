@@ -1,8 +1,0 @@
-module Cdns_sd [system] {
-    header "shim.h"
-    // No `link "dns_sd"` — we deliberately don't add a DT_NEEDED entry so the
-    // executable launches even when libavahi-compat-libdnssd isn't installed.
-    // BonjourDiscovery loads the library at runtime via dlopen and reports a
-    // friendly error if it's missing.
-    export *
-}

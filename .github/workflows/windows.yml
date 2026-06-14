@@ -17,15 +17,68 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v6
-      # The HTTP/WebSocket stack (Signal K REST/WS, Victron VRM) is compiled out
-      # on Windows via #if !os(Windows); this job verifies the gated build.
+      # The NetworkTransport target links libcurl on Windows (CCurl system
+      # library): TCP, HTTP and WebSocket all go through it, UDP through
+      # Winsock. The headers and import library come from vcpkg, which is
+      # preinstalled on the hosted runners.
       - uses: compnerd/gha-setup-swift@main
         with:
           branch: swift-${{ env.SWIFT_VERSION }}-release
           tag: ${{ env.SWIFT_VERSION }}-RELEASE
       - name: Check Swift Version
         run: swift --version
+      - name: Cache vcpkg-built libcurl
+        uses: actions/cache@v4
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-curl-websockets-x64-windows-static-md-v1
+      # Static triplet (dynamic CRT, matching the Swift runtime) so
+      # boattools.exe is self-contained — no libcurl/zlib DLLs to ship.
+      - name: Install libcurl (websockets feature, static)
+        run: vcpkg install curl[websockets]:x64-windows-static-md
       - name: Generate version
         shell: bash
         run: bash Scripts/version.sh Sources/BoatTools/Version.generated.swift
-      - run: swift build -c release
+      - name: Build
+        run: >-
+          swift build -c release
+          -Xcc "-I$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows-static-md\include"
+          -Xlinker "/LIBPATH:$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows-static-md\lib"
+      # Self-containment guard: the exe must not import libcurl or zlib DLLs.
+      # (Import table entries are plain ASCII names inside the binary.)
+      - name: Check no curl/zlib DLL imports
+        shell: pwsh
+        run: |
+          $ascii = [System.Text.Encoding]::ASCII.GetString(
+            [System.IO.File]::ReadAllBytes(".build\release\boattools.exe"))
+          if ($ascii -match "(?i)libcurl[\w-]*\.dll" -or $ascii -match "(?i)zlib[\w-]*\.dll") {
+            Write-Error "boattools.exe still imports a curl/zlib DLL ($($Matches[0]))"
+            exit 1
+          }
+          Write-Host "OK: no curl/zlib DLL imports"
+      # Downloadable from the run page, for manual testing on a real machine.
+      # The Swift runtime DLLs ride along: a Swift executable loads them
+      # dynamically and test machines have no Swift toolchain installed.
+      - name: Stage exe with Swift runtime DLLs
+        shell: pwsh
+        run: |
+          # gha-setup-swift installs per-user (%LocalAppData%\Programs\Swift);
+          # the machine-wide Program Files location is kept as a fallback.
+          $runtimeBin = @(
+            "$env:LOCALAPPDATA\Programs\Swift\Runtimes\*\usr\bin",
+            "$env:ProgramFiles\Swift\Runtimes\*\usr\bin"
+          ) | ForEach-Object { Resolve-Path $_ -ErrorAction SilentlyContinue } |
+            Select-Object -ExpandProperty Path -First 1
+          if (-not $runtimeBin) {
+            Write-Error "Swift runtime DLL directory not found"
+            exit 1
+          }
+          Write-Host "Bundling Swift runtime from $runtimeBin"
+          New-Item -ItemType Directory pkg | Out-Null
+          Copy-Item ".build\release\boattools.exe" pkg\
+          Copy-Item "$runtimeBin\*.dll" pkg\
+      - name: Upload boattools artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: boattools-windows-x64
+          path: pkg\*

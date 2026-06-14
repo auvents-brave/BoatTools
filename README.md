@@ -9,10 +9,9 @@ The package ships two products:
 
 ## Install
 
-Download pre-built binaries for **macOS, Linux and Windows** from
-**[pitch-and-roll.com](https://pitch-and-roll.com)** — it lists, for every
-supported platform, both the latest stable release and the in-development build
-from the `lab` branch.
+Download pre-built binaries for **macOS, Windows and Linux** from the
+**[GitHub releases page](https://github.com/auvents-brave/BoatTools/releases)** —
+it carries both the latest stable release and a rolling pre-release.
 
 The macOS package is signed and **notarised by Apple**, so it installs without
 any Gatekeeper warning, dropping `boattools` into `/usr/local/bin`. On Linux,
@@ -32,13 +31,51 @@ regenerates the embedded version string (`Sources/BoatTools/Version.generated.sw
 git-ignored) from `git describe`, so `boattools --version` stays accurate. A bare
 `swift build` still works, but the version is only refreshed when you run `make`.
 
+## Platform networking
+
+All socket-level code lives behind four
+platform-neutral protocols (`TCPTransport`, `UDPTransport`, `HTTPTransport`,
+`WebSocketTransport`) selected at compile time through `NetworkStack`:
+
+| | Apple / Linux | Windows |
+|---|---|---|
+| TCP | SwiftNIO (`ClientBootstrap`) | libcurl (`CONNECT_ONLY=1`, `curl_easy_send`/`recv`) |
+| UDP (broadcast + multicast) | SwiftNIO (`DatagramBootstrap`) | Winsock (`recvfrom`, `IP_ADD_MEMBERSHIP`) |
+| HTTP(S) | AsyncHTTPClient | libcurl easy interface (Schannel TLS) |
+| WebSocket | WebSocketKit | libcurl (`CONNECT_ONLY=2`, `curl_ws_send`/`recv`) |
+
+### Building on Windows
+
+The Windows build links libcurl **statically** through the `CCurl`
+system-library target, so the resulting `boattools.exe` is self-contained —
+no DLLs to ship or install. Install libcurl with [vcpkg](https://vcpkg.io)
+using the static triplet (`-md` = dynamic C runtime, matching the Swift
+runtime); the **`websockets` feature is required** (WebSocket support is
+enabled by default in curl ≥ 8.11 but vcpkg still gates it behind a feature
+flag):
+
+```
+vcpkg install curl[websockets]:x64-windows-static-md
+```
+
+Then point the compiler and linker at the vcpkg tree, e.g.:
+
+```
+swift build -Xcc -I%VCPKG_ROOT%\installed\x64-windows-static-md\include ^
+            -Xlinker /LIBPATH:%VCPKG_ROOT%\installed\x64-windows-static-md\lib
+```
+
+(That is exactly what the Windows CI workflow does — see
+[`.github/workflows/windows.yml`](.github/workflows/windows.yml), which also
+verifies that the produced executable imports no curl/zlib DLL.)
+
 ## Swift 6 strict concurrency highlights
 
 - All public types are **Sendable** (`BoatMetric`, `NMEAFrame`, `JSONValue`, configs, errors).
 - Signal K snapshots are typed `JSONValue` (a `Sendable` enum) rather than `[String: Any]`.
-- `SignalKClient`: `final class @unchecked Sendable`, mutable token managed by an internal `actor TokenStore`. Authentication via bearer token or username / password.
-- `VictronVRMClient`: `final class @unchecked Sendable`, no mutable state.
-- `NMEATransport`: `struct Sendable`. State (LineAggregator, FrameDispatcher, NIO handlers) is **confined to the NIO event loop** — no manual lock, marked `@unchecked Sendable` because isolation is guaranteed by the NIO pipeline.
+- `SignalKClient`: `final class Sendable`, mutable token managed by an internal `actor TokenStore`. Authentication via bearer token or username / password.
+- `VictronVRMClient`: `final class Sendable`, no mutable state.
+- `NMEATransport`: `struct Sendable`. State (LineAggregator, FrameDispatcher, the assemblers) is **confined to the single task that consumes the byte stream** — no manual lock and no `@unchecked Sendable`.
 - Explicit lifecycle: async `shutdown()`, no magic deinit.
 - Upcoming features enabled: `ExistentialAny`, `InternalImportsByDefault`.
 - Diagnostic frames: every transport emits `.invalidChecksum(rawLine:)` for bad-XOR NMEA sentences and `.unknown(rawLine:)` for unparseable lines / non-conforming Signal K JSON. The CLI prints them in red / orange when stdout is a TTY.
@@ -70,7 +107,7 @@ frames to the clients and the metric store and let them dispatch.
 **Clients** — talk to live data sources.
 - `SignalKClient` — REST snapshots (`snapshot(...)`), WebSocket live stream (`liveStream(...)`), and raw NDJSON delta streams over TCP / UDP (`tcpStream(...)`, `udpStream(...)`), with token- or password-based auth (`login(...)`).
 - `VictronVRMClient` — VRM Portal HTTP API: `installations()`, `diagnostics(siteId:)`, and `metrics(siteId:)` mapped onto canonical metric names nested under per-device prefixes (`battery.0.`, `solar.1.`, `tank.`, `vebus.`, `system.`). `labels(...)` fetches the installation's custom device names; `frameStream(...)` polls continuously, or takes a single snapshot when the interval is zero. `DiagnosticRecord` exposes `device`, `instance` and a `unit` stripped of its printf format.
-- Each client also offers NIO-free `static` stream factories (`SignalKClient.liveStream(config:)` / `.tcpStream(...)` / `.udpStream(...)`, `VictronVRMClient.frameStream(accessToken:siteId:...)`) that own their event loop internally, so callers can pipe them straight into the store with no SwiftNIO of their own.
+- Each client also offers `static` stream factories (`SignalKClient.liveStream(config:)` / `.tcpStream(...)` / `.udpStream(...)`, `VictronVRMClient.frameStream(accessToken:siteId:...)`) that manage the underlying transport internally, so callers can pipe them straight into the store without touching the networking stack.
 
 **Transport** — NMEA over TCP / UDP / file.
 - `NMEATransport` — opens a TCP or UDP socket, demultiplexes lines, runs the multipart / fast-packet / GSV assemblers, emits `NMEAFrame` values.

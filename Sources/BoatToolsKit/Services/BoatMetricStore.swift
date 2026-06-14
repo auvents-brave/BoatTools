@@ -1,23 +1,21 @@
 public import Foundation
 public import Observation  // `@Observable` on the public BoatMetricStore exposes the Observable conformance
 
-
 // MARK: - TimedSample
 
 /// A timestamped scalar sample stored in a history ring buffer.
 public struct TimedSample: Sendable, Codable {
-    /// Time the sample was recorded.
-    public let timestamp: Date
-    /// The measured value (SI or nautical units, same convention as ``BoatMetric``).
-    public let value: Double
+	/// Time the sample was recorded.
+	public let timestamp: Date
+	/// The measured value (SI or nautical units, same convention as ``BoatMetric``).
+	public let value: Double
 
-    /// Creates a sample.
-    public init(timestamp: Date, value: Double) {
-        self.timestamp = timestamp
-        self.value     = value
-    }
+	/// Creates a sample.
+	public init(timestamp: Date, value: Double) {
+		self.timestamp = timestamp
+		self.value = value
+	}
 }
-
 
 // MARK: - RingBuffer
 
@@ -28,47 +26,46 @@ public struct TimedSample: Sendable, Codable {
 /// accessor always returns elements oldest-first regardless of internal layout.
 public struct RingBuffer<T: Sendable>: Sendable {
 
-    private var storage:    [T] = []
-    private var writeIndex: Int = 0
+	private var storage: [T] = []
+	private var writeIndex: Int = 0
 
-    /// Maximum number of elements the buffer holds.
-    public let capacity: Int
+	/// Maximum number of elements the buffer holds.
+	public let capacity: Int
 
-    /// Number of elements currently stored.
-    public var count: Int { storage.count }
+	/// Number of elements currently stored.
+	public var count: Int { storage.count }
 
-    /// `true` when no elements have been stored yet.
-    public var isEmpty: Bool { storage.isEmpty }
+	/// `true` when no elements have been stored yet.
+	public var isEmpty: Bool { storage.isEmpty }
 
-    /// Creates an empty ring buffer with the given `capacity`.
-    public init(capacity: Int) {
-        self.capacity = capacity
-        storage.reserveCapacity(capacity)
-    }
+	/// Creates an empty ring buffer with the given `capacity`.
+	public init(capacity: Int) {
+		self.capacity = capacity
+		storage.reserveCapacity(capacity)
+	}
 
-    /// Appends `element`, evicting the oldest element when the buffer is full.
-    public mutating func append(_ element: T) {
-        if storage.count < capacity {
-            storage.append(element)
-        } else {
-            storage[writeIndex] = element
-        }
-        writeIndex = (writeIndex + 1) % capacity
-    }
+	/// Appends `element`, evicting the oldest element when the buffer is full.
+	public mutating func append(_ element: T) {
+		if storage.count < capacity {
+			storage.append(element)
+		} else {
+			storage[writeIndex] = element
+		}
+		writeIndex = (writeIndex + 1) % capacity
+	}
 
-    /// All elements in chronological order (oldest first).
-    public var chronological: [T] {
-        guard storage.count == capacity else { return storage }
-        return Array(storage[writeIndex...]) + Array(storage[..<writeIndex])
-    }
+	/// All elements in chronological order (oldest first).
+	public var chronological: [T] {
+		guard storage.count == capacity else { return storage }
+		return Array(storage[writeIndex...]) + Array(storage[..<writeIndex])
+	}
 
-    /// Removes all elements, resetting the buffer to empty.
-    public mutating func removeAll() {
-        storage.removeAll(keepingCapacity: true)
-        writeIndex = 0
-    }
+	/// Removes all elements, resetting the buffer to empty.
+	public mutating func removeAll() {
+		storage.removeAll(keepingCapacity: true)
+		writeIndex = 0
+	}
 }
-
 
 // MARK: - TieredHistory
 
@@ -83,61 +80,60 @@ public struct RingBuffer<T: Sendable>: Sendable {
 /// mean** so that wrapping through 0°/360° does not corrupt averages.
 public struct TieredHistory: Sendable {
 
-    /// 5-second samples — up to 720 samples covering 1 hour.
-    public private(set) var recent = RingBuffer<TimedSample>(capacity: 720)
+	/// 5-second samples — up to 720 samples covering 1 hour.
+	public private(set) var recent = RingBuffer<TimedSample>(capacity: 720)
 
-    /// 1-minute samples — up to 360 samples covering 6 hours.
-    public private(set) var long   = RingBuffer<TimedSample>(capacity: 360)
+	/// 1-minute samples — up to 360 samples covering 6 hours.
+	public private(set) var long = RingBuffer<TimedSample>(capacity: 360)
 
-    /// Whether values are angles in degrees. Circular mean is used when `true`.
-    public let isAngle: Bool
+	/// Whether values are angles in degrees. Circular mean is used when `true`.
+	public let isAngle: Bool
 
-    private var recentAcc:       [Double] = []
-    private var longAcc:         [Double] = []
-    private var recentLastFlush: Date     = .distantPast
-    private var longLastFlush:   Date     = .distantPast
+	private var recentAcc: [Double] = []
+	private var longAcc: [Double] = []
+	private var recentLastFlush: Date = .distantPast
+	private var longLastFlush: Date = .distantPast
 
-    /// Creates a tiered history.
-    ///
-    /// - Parameter isAngle: Pass `true` for angular metrics (e.g. TWD, COG, AWA).
-    public init(isAngle: Bool = false) {
-        self.isAngle = isAngle
-    }
+	/// Creates a tiered history.
+	///
+	/// - Parameter isAngle: Pass `true` for angular metrics (e.g. TWD, COG, AWA).
+	public init(isAngle: Bool = false) {
+		self.isAngle = isAngle
+	}
 
-    /// Records a raw value at `now`, flushing a smoothed sample to each tier
-    /// when its interval has elapsed.
-    public mutating func add(_ value: Double, at now: Date) {
-        recentAcc.append(value)
-        longAcc.append(value)
+	/// Records a raw value at `now`, flushing a smoothed sample to each tier
+	/// when its interval has elapsed.
+	public mutating func add(_ value: Double, at now: Date) {
+		recentAcc.append(value)
+		longAcc.append(value)
 
-        if now.timeIntervalSince(recentLastFlush) >= 5 {
-            recent.append(TimedSample(timestamp: now, value: circularMeanIfNeeded(recentAcc)))
-            recentAcc.removeAll()
-            recentLastFlush = now
-        }
+		if now.timeIntervalSince(recentLastFlush) >= 5 {
+			recent.append(TimedSample(timestamp: now, value: circularMeanIfNeeded(recentAcc)))
+			recentAcc.removeAll()
+			recentLastFlush = now
+		}
 
-        if now.timeIntervalSince(longLastFlush) >= 60 {
-            long.append(TimedSample(timestamp: now, value: circularMeanIfNeeded(longAcc)))
-            longAcc.removeAll()
-            longLastFlush = now
-        }
-    }
+		if now.timeIntervalSince(longLastFlush) >= 60 {
+			long.append(TimedSample(timestamp: now, value: circularMeanIfNeeded(longAcc)))
+			longAcc.removeAll()
+			longLastFlush = now
+		}
+	}
 
-    // MARK: Private
+	// MARK: Private
 
-    private func circularMeanIfNeeded(_ values: [Double]) -> Double {
-        guard !values.isEmpty else { return 0 }
-        guard isAngle else {
-            return values.reduce(0.0, +) / Double(values.count)
-        }
-        let rad  = values.map { $0 * .pi / 180 }
-        let sinS = rad.reduce(0.0) { $0 + sin($1) }
-        let cosS = rad.reduce(0.0) { $0 + cos($1) }
-        let deg  = atan2(sinS, cosS) * 180 / .pi
-        return deg < 0 ? deg + 360 : deg
-    }
+	private func circularMeanIfNeeded(_ values: [Double]) -> Double {
+		guard !values.isEmpty else { return 0 }
+		guard isAngle else {
+			return values.reduce(0.0, +) / Double(values.count)
+		}
+		let rad = values.map { $0 * .pi / 180 }
+		let sinS = rad.reduce(0.0) { $0 + sin($1) }
+		let cosS = rad.reduce(0.0) { $0 + cos($1) }
+		let deg = atan2(sinS, cosS) * 180 / .pi
+		return deg < 0 ? deg + 360 : deg
+	}
 }
-
 
 // MARK: - PressureHistory
 
@@ -148,27 +144,26 @@ public struct TieredHistory: Sendable {
 /// per 3 h = 1.5 hPa per sample).
 public struct PressureHistory: Sendable {
 
-    /// 30-minute samples — up to 96 samples covering 48 hours.
-    public private(set) var samples = RingBuffer<TimedSample>(capacity: 96)
+	/// 30-minute samples — up to 96 samples covering 48 hours.
+	public private(set) var samples = RingBuffer<TimedSample>(capacity: 96)
 
-    private var acc:       [Double] = []
-    private var lastFlush: Date     = .distantPast
+	private var acc: [Double] = []
+	private var lastFlush: Date = .distantPast
 
-    /// Creates an empty pressure history.
-    public init() {}
+	/// Creates an empty pressure history.
+	public init() {}
 
-    /// Records a raw value at `now`, flushing an averaged sample every 30 minutes.
-    public mutating func add(_ value: Double, at now: Date) {
-        acc.append(value)
-        if now.timeIntervalSince(lastFlush) >= 1800 {   // 30 min
-            let avg = acc.reduce(0.0, +) / Double(acc.count)
-            samples.append(TimedSample(timestamp: now, value: avg))
-            acc.removeAll()
-            lastFlush = now
-        }
-    }
+	/// Records a raw value at `now`, flushing an averaged sample every 30 minutes.
+	public mutating func add(_ value: Double, at now: Date) {
+		acc.append(value)
+		if now.timeIntervalSince(lastFlush) >= 1800 {  // 30 min
+			let avg = acc.reduce(0.0, +) / Double(acc.count)
+			samples.append(TimedSample(timestamp: now, value: avg))
+			acc.removeAll()
+			lastFlush = now
+		}
+	}
 }
-
 
 // ============================================================
 // MARK: - Private plumbing: source tagging & priority resolver
@@ -177,17 +172,17 @@ public struct PressureHistory: Sendable {
 // MARK: - SourceKind
 
 private enum SourceKind: Sendable, Equatable {
-    case nmea0183(talker: String, type: String)
-    case nmea2000(pgn: UInt32)
-    case signalK
-    case unknown
+	case nmea0183(talker: String, type: String)
+	case nmea2000(pgn: UInt32)
+	case signalK
+	case unknown
 }
 
 // MARK: - TaggedMetric
 
 private struct TaggedMetric: Sendable {
-    let metric: BoatMetric
-    let source: SourceKind
+	let metric: BoatMetric
+	let source: SourceKind
 }
 
 // MARK: - FrameCollector
@@ -195,108 +190,109 @@ private struct TaggedMetric: Sendable {
 /// Accumulates all frames within a 1-second window.
 private struct FrameCollector: Sendable {
 
-    struct Candidate: Sendable {
-        let metric: BoatMetric
-        let source: SourceKind
-        let rank:   Int
-    }
+	struct Candidate: Sendable {
+		let metric: BoatMetric
+		let source: SourceKind
+		let rank: Int
+	}
 
-    var candidates:  [String: Candidate]     = [:]
-    var aisTargets:  [AISTarget]             = []
-    var gsvReports:  [(constellation: String, inView: Int, satellites: [SatelliteInfo])] = []
+	var candidates: [String: Candidate] = [:]
+	var aisTargets: [AISTarget] = []
+	var gsvReports: [(constellation: String, inView: Int, satellites: [SatelliteInfo])] = []
 
-    /// HDOP observed per NMEA talker this window — used to tie-break GPS sources.
-    var hdopByTalker: [String: Double] = [:]
+	/// HDOP observed per NMEA talker this window — used to tie-break GPS sources.
+	var hdopByTalker: [String: Double] = [:]
 
-    mutating func reset() {
-        candidates.removeAll()
-        aisTargets.removeAll()
-        gsvReports.removeAll()
-        hdopByTalker.removeAll()
-    }
+	mutating func reset() {
+		candidates.removeAll()
+		aisTargets.removeAll()
+		gsvReports.removeAll()
+		hdopByTalker.removeAll()
+	}
 
-    mutating func add(_ tagged: TaggedMetric) {
-        let name = tagged.metric.name
+	mutating func add(_ tagged: TaggedMetric) {
+		let name = tagged.metric.name
 
-        // Track HDOP per NMEA talker for position tie-breaking.
-        if name == "gps.hdop", case .nmea0183(let talker, _) = tagged.source {
-            hdopByTalker[talker] = tagged.metric.value
-        }
+		// Track HDOP per NMEA talker for position tie-breaking.
+		if name == "gps.hdop", case .nmea0183(let talker, _) = tagged.source {
+			hdopByTalker[talker] = tagged.metric.value
+		}
 
-        let rank = PriorityResolver.rank(for: name, source: tagged.source)
+		let rank = PriorityResolver.rank(for: name, source: tagged.source)
 
-        if let existing = candidates[name] {
-            if rank < existing.rank {
-                candidates[name] = Candidate(metric: tagged.metric, source: tagged.source, rank: rank)
-            } else if rank == existing.rank,
-                      let winner = tieBreak(new: tagged, existing: existing, name: name) {
-                candidates[name] = winner
-            }
-        } else {
-            candidates[name] = Candidate(metric: tagged.metric, source: tagged.source, rank: rank)
-        }
-    }
+		if let existing = candidates[name] {
+			if rank < existing.rank {
+				candidates[name] = Candidate(metric: tagged.metric, source: tagged.source, rank: rank)
+			} else if rank == existing.rank,
+				let winner = tieBreak(new: tagged, existing: existing, name: name)
+			{
+				candidates[name] = winner
+			}
+		} else {
+			candidates[name] = Candidate(metric: tagged.metric, source: tagged.source, rank: rank)
+		}
+	}
 
-    // MARK: Tie-breaking
+	// MARK: Tie-breaking
 
-    private func tieBreak(new: TaggedMetric, existing: Candidate, name: String) -> Candidate? {
-        if isPositionMetric(name) {
-            return positionTieBreak(new: new, existing: existing)
-        }
-        if isSOGCOGMetric(name) {
-            let newOrder = talkerOrder(talker(of: new.source))
-            let exOrder  = talkerOrder(talker(of: existing.source))
-            return newOrder < exOrder
-                ? Candidate(metric: new.metric, source: new.source, rank: existing.rank)
-                : nil
-        }
-        // Default: first seen wins.
-        return nil
-    }
+	private func tieBreak(new: TaggedMetric, existing: Candidate, name: String) -> Candidate? {
+		if isPositionMetric(name) {
+			return positionTieBreak(new: new, existing: existing)
+		}
+		if isSOGCOGMetric(name) {
+			let newOrder = talkerOrder(talker(of: new.source))
+			let exOrder = talkerOrder(talker(of: existing.source))
+			return newOrder < exOrder
+				? Candidate(metric: new.metric, source: new.source, rank: existing.rank)
+				: nil
+		}
+		// Default: first seen wins.
+		return nil
+	}
 
-    private func positionTieBreak(new: TaggedMetric, existing: Candidate) -> Candidate? {
-        let newTalker = talker(of: new.source)
-        let exTalker  = talker(of: existing.source)
-        let newHDOP   = hdopByTalker[newTalker] ?? .infinity
-        let exHDOP    = hdopByTalker[exTalker]  ?? .infinity
+	private func positionTieBreak(new: TaggedMetric, existing: Candidate) -> Candidate? {
+		let newTalker = talker(of: new.source)
+		let exTalker = talker(of: existing.source)
+		let newHDOP = hdopByTalker[newTalker] ?? .infinity
+		let exHDOP = hdopByTalker[exTalker] ?? .infinity
 
-        if newHDOP < exHDOP {
-            return Candidate(metric: new.metric, source: new.source, rank: existing.rank)
-        }
-        if newHDOP == exHDOP && talkerOrder(newTalker) < talkerOrder(exTalker) {
-            return Candidate(metric: new.metric, source: new.source, rank: existing.rank)
-        }
-        return nil
-    }
+		if newHDOP < exHDOP {
+			return Candidate(metric: new.metric, source: new.source, rank: existing.rank)
+		}
+		if newHDOP == exHDOP && talkerOrder(newTalker) < talkerOrder(exTalker) {
+			return Candidate(metric: new.metric, source: new.source, rank: existing.rank)
+		}
+		return nil
+	}
 
-    // MARK: Helpers
+	// MARK: Helpers
 
-    private func isPositionMetric(_ name: String) -> Bool {
-        name == "lat" || name == "lon" || name == "altitude"
-    }
+	private func isPositionMetric(_ name: String) -> Bool {
+		name == "lat" || name == "lon" || name == "altitude"
+	}
 
-    private func isSOGCOGMetric(_ name: String) -> Bool {
-        name == "SOG" || name == "COG"
-    }
+	private func isSOGCOGMetric(_ name: String) -> Bool {
+		name == "SOG" || name == "COG"
+	}
 
-    private func talker(of source: SourceKind) -> String {
-        guard case .nmea0183(let t, _) = source else { return "" }
-        return t
-    }
+	private func talker(of source: SourceKind) -> String {
+		guard case .nmea0183(let t, _) = source else { return "" }
+		return t
+	}
 
-    /// Talker priority: GP=0 (best) … GI=6, others=7 (worst).
-    private func talkerOrder(_ talker: String) -> Int {
-        switch talker {
-        case "GP": return 0
-        case "GN": return 1
-        case "GA": return 2
-        case "GL": return 3
-        case "GB": return 4
-        case "GQ": return 5
-        case "GI": return 6
-        default:   return 7
-        }
-    }
+	/// Talker priority: GP=0 (best) … GI=6, others=7 (worst).
+	private func talkerOrder(_ talker: String) -> Int {
+		switch talker {
+		case "GP": return 0
+		case "GN": return 1
+		case "GA": return 2
+		case "GL": return 3
+		case "GB": return 4
+		case "GQ": return 5
+		case "GI": return 6
+		default: return 7
+		}
+	}
 }
 
 // MARK: - PriorityResolver
@@ -304,211 +300,215 @@ private struct FrameCollector: Sendable {
 /// Maps (metric name, source) → priority rank. Lower = higher priority.
 private enum PriorityResolver {
 
-    static func rank(for metricName: String, source: SourceKind) -> Int {
-        switch metricName {
+	static func rank(for metricName: String, source: SourceKind) -> Int {
+		switch metricName {
 
-        // --- 1. Position ---
-        case "lat", "lon", "altitude":
-            return positionRank(source)
+		// --- 1. Position ---
+		case "lat", "lon", "altitude":
+			return positionRank(source)
 
-        // --- 2. SOG / COG ---
-        case "SOG", "COG":
-            return sogCogRank(source)
+		// --- 2. SOG / COG ---
+		case "SOG", "COG":
+			return sogCogRank(source)
 
-        // --- 3. Speed through water ---
-        case "STW":
-            return stwRank(source)
+		// --- 3. Speed through water ---
+		case "STW":
+			return stwRank(source)
 
-        // --- 4. Heading ---
-        case "HDG.true", "HDG.magnetic", "magneticVariation", "magneticDeviation":
-            return headingRank(source)
+		// --- 4. Heading ---
+		case "HDG.true", "HDG.magnetic", "magneticVariation", "magneticDeviation":
+			return headingRank(source)
 
-        // --- 5. Rate of turn ---
-        case "ROT":
-            return rotRank(source)
+		// --- 5. Rate of turn ---
+		case "ROT":
+			return rotRank(source)
 
-        // --- 6a. Apparent wind ---
-        case "AWA", "AWS":
-            return apparentWindRank(source)
+		// --- 6a. Apparent wind ---
+		case "AWA", "AWS":
+			return apparentWindRank(source)
 
-        // --- 6b. True wind ---
-        case "TWA", "TWD", "TWS":
-            return trueWindRank(source)
+		// --- 6b. True wind ---
+		case "TWA", "TWD", "TWS":
+			return trueWindRank(source)
 
-        // --- 7. Depth ---
-        case "depth", "depth.offset":
-            return depthRank(source)
+		// --- 7. Depth ---
+		case "depth", "depth.offset":
+			return depthRank(source)
 
-        // --- 8. Autopilot / XTE ---
-        case "navigation.xte":
-            return autopilotRank(source)
+		// --- 8. Autopilot / XTE ---
+		case "navigation.xte":
+			return autopilotRank(source)
 
-        // --- 9. Navigation / routing ---
-        case "navigation.bearingToDest",
-             "navigation.distanceToWaypoint",
-             "navigation.vmg",
-             "waypoint.lat", "waypoint.lon":
-            return navRank(source)
+		// --- 9. Navigation / routing ---
+		case "navigation.bearingToDest",
+			"navigation.distanceToWaypoint",
+			"navigation.vmg",
+			"waypoint.lat", "waypoint.lon":
+			return navRank(source)
 
-        // --- 10. Atmosphere ---
-        case "pressure.atmospheric":
-            return atmosphereRank(pgns: [130310, 130311, 130314],
-                                  nmea0183Types: ["MDA"],
-                                  source: source)
+		// --- 10. Atmosphere ---
+		case "pressure.atmospheric":
+			return atmosphereRank(
+				pgns: [130310, 130311, 130314],
+				nmea0183Types: ["MDA"],
+				source: source)
 
-        case "temperature.air":
-            return atmosphereRank(pgns: [130310, 130311],
-                                  nmea0183Types: ["MDA"],
-                                  source: source)
+		case "temperature.air":
+			return atmosphereRank(
+				pgns: [130310, 130311],
+				nmea0183Types: ["MDA"],
+				source: source)
 
-        case "temperature.water":
-            return atmosphereRank(pgns: [130310, 130311, 130312],
-                                  nmea0183Types: ["MTW", "MDA"],
-                                  source: source)
+		case "temperature.water":
+			return atmosphereRank(
+				pgns: [130310, 130311, 130312],
+				nmea0183Types: ["MTW", "MDA"],
+				source: source)
 
-        case "humidity":
-            return atmosphereRank(pgns: [130311],
-                                  nmea0183Types: ["MDA"],
-                                  source: source)
+		case "humidity":
+			return atmosphereRank(
+				pgns: [130311],
+				nmea0183Types: ["MDA"],
+				source: source)
 
-        // --- 11. Everything else (engines, tanks, batteries, AIS, radar, …) ---
-        default:
-            return defaultRank(source)
-        }
-    }
+		// --- 11. Everything else (engines, tanks, batteries, AIS, radar, …) ---
+		default:
+			return defaultRank(source)
+		}
+	}
 
-    // MARK: Per-group rank functions
+	// MARK: Per-group rank functions
 
-    private static func positionRank(_ s: SourceKind) -> Int {
-        switch s {
-        case .nmea2000(pgn: 129029):        return 10   // GNSS Position Data — full quality
-        case .nmea0183(_, type: "GGA"):     return 20   // HDOP + fix quality
-        case .nmea0183(_, type: "GNS"):     return 30   // multi-constellation GGA variant
-        case .nmea2000(pgn: 129025):        return 40   // Position Rapid Update — no quality
-        case .nmea0183(_, type: "RMC"):     return 50   // no quality field
-        case .nmea0183(_, type: "GLL"):     return 60   // lat/lon only
-        case .signalK:                      return 70
-        default:                            return 100
-        }
-    }
+	private static func positionRank(_ s: SourceKind) -> Int {
+		switch s {
+		case .nmea2000(pgn: 129029): return 10  // GNSS Position Data — full quality
+		case .nmea0183(_, type: "GGA"): return 20  // HDOP + fix quality
+		case .nmea0183(_, type: "GNS"): return 30  // multi-constellation GGA variant
+		case .nmea2000(pgn: 129025): return 40  // Position Rapid Update — no quality
+		case .nmea0183(_, type: "RMC"): return 50  // no quality field
+		case .nmea0183(_, type: "GLL"): return 60  // lat/lon only
+		case .signalK: return 70
+		default: return 100
+		}
+	}
 
-    private static func sogCogRank(_ s: SourceKind) -> Int {
-        switch s {
-        case .nmea2000(pgn: 129026):        return 10   // COG & SOG Rapid Update
-        case .nmea0183(_, type: "VTG"):     return 20
-        case .nmea0183(_, type: "RMC"):     return 30
-        case .nmea0183(_, type: "VBW"):     return 40   // longitudinal ground speed only (SOG; no COG)
-        case .signalK:                      return 50
-        default:                            return 100
-        }
-    }
+	private static func sogCogRank(_ s: SourceKind) -> Int {
+		switch s {
+		case .nmea2000(pgn: 129026): return 10  // COG & SOG Rapid Update
+		case .nmea0183(_, type: "VTG"): return 20
+		case .nmea0183(_, type: "RMC"): return 30
+		case .nmea0183(_, type: "VBW"): return 40  // longitudinal ground speed only (SOG; no COG)
+		case .signalK: return 50
+		default: return 100
+		}
+	}
 
-    private static func stwRank(_ s: SourceKind) -> Int {
-        switch s {
-        case .nmea2000(pgn: 128259):        return 10   // Speed
-        case .nmea0183(_, type: "VHW"):     return 20   // dedicated water-speed sentence
-        case .nmea0183(_, type: "VBW"):     return 30   // longitudinal water speed
-        case .signalK:                      return 40
-        default:                            return 100
-        }
-    }
+	private static func stwRank(_ s: SourceKind) -> Int {
+		switch s {
+		case .nmea2000(pgn: 128259): return 10  // Speed
+		case .nmea0183(_, type: "VHW"): return 20  // dedicated water-speed sentence
+		case .nmea0183(_, type: "VBW"): return 30  // longitudinal water speed
+		case .signalK: return 40
+		default: return 100
+		}
+	}
 
-    private static func headingRank(_ s: SourceKind) -> Int {
-        switch s {
-        case .nmea2000(pgn: 127250):        return 10   // Vessel Heading — most complete
-        case .nmea0183(_, type: "HDT"):     return 20
-        case .nmea0183(_, type: "HDG"):     return 30
-        case .nmea0183(_, type: "HDM"):     return 40
-        case .signalK:                      return 50
-        default:                            return 100
-        }
-    }
+	private static func headingRank(_ s: SourceKind) -> Int {
+		switch s {
+		case .nmea2000(pgn: 127250): return 10  // Vessel Heading — most complete
+		case .nmea0183(_, type: "HDT"): return 20
+		case .nmea0183(_, type: "HDG"): return 30
+		case .nmea0183(_, type: "HDM"): return 40
+		case .signalK: return 50
+		default: return 100
+		}
+	}
 
-    private static func rotRank(_ s: SourceKind) -> Int {
-        switch s {
-        case .nmea2000(pgn: 127251):        return 10
-        case .nmea0183(_, type: "ROT"):     return 20
-        case .signalK:                      return 30
-        default:                            return 100
-        }
-    }
+	private static func rotRank(_ s: SourceKind) -> Int {
+		switch s {
+		case .nmea2000(pgn: 127251): return 10
+		case .nmea0183(_, type: "ROT"): return 20
+		case .signalK: return 30
+		default: return 100
+		}
+	}
 
-    private static func apparentWindRank(_ s: SourceKind) -> Int {
-        switch s {
-        case .nmea2000(pgn: 130306):        return 10   // Wind Data (apparent reference)
-        case .nmea0183(_, type: "MWV"):     return 20   // reference = R
-        case .nmea0183(_, type: "VWR"):     return 30   // older relative wind
-        case .signalK:                      return 40
-        default:                            return 100
-        }
-    }
+	private static func apparentWindRank(_ s: SourceKind) -> Int {
+		switch s {
+		case .nmea2000(pgn: 130306): return 10  // Wind Data (apparent reference)
+		case .nmea0183(_, type: "MWV"): return 20  // reference = R
+		case .nmea0183(_, type: "VWR"): return 30  // older relative wind
+		case .signalK: return 40
+		default: return 100
+		}
+	}
 
-    private static func trueWindRank(_ s: SourceKind) -> Int {
-        switch s {
-        case .nmea2000(pgn: 130306):        return 10   // Wind Data (true/ground reference)
-        case .nmea0183(_, type: "MWD"):     return 20   // dedicated true wind
-        case .nmea0183(_, type: "MWV"):     return 30   // reference = T
-        case .nmea0183(_, type: "MDA"):     return 40   // composite; wind is secondary
-        case .signalK:                      return 50
-        default:                            return 100
-        }
-    }
+	private static func trueWindRank(_ s: SourceKind) -> Int {
+		switch s {
+		case .nmea2000(pgn: 130306): return 10  // Wind Data (true/ground reference)
+		case .nmea0183(_, type: "MWD"): return 20  // dedicated true wind
+		case .nmea0183(_, type: "MWV"): return 30  // reference = T
+		case .nmea0183(_, type: "MDA"): return 40  // composite; wind is secondary
+		case .signalK: return 50
+		default: return 100
+		}
+	}
 
-    private static func depthRank(_ s: SourceKind) -> Int {
-        switch s {
-        case .nmea2000(pgn: 128267):        return 10   // Water Depth
-        case .nmea0183(_, type: "DPT"):     return 20
-        case .nmea0183(_, type: "DBT"):     return 30
-        case .signalK:                      return 40
-        default:                            return 100
-        }
-    }
+	private static func depthRank(_ s: SourceKind) -> Int {
+		switch s {
+		case .nmea2000(pgn: 128267): return 10  // Water Depth
+		case .nmea0183(_, type: "DPT"): return 20
+		case .nmea0183(_, type: "DBT"): return 30
+		case .signalK: return 40
+		default: return 100
+		}
+	}
 
-    /// Autopilot / cross-track error. APB is preferred over APA (backward-compat pattern).
-    private static func autopilotRank(_ s: SourceKind) -> Int {
-        switch s {
-        case .nmea0183(_, type: "APB"):     return 10   // most complete autopilot sentence
-        case .nmea0183(_, type: "APA"):     return 20   // legacy; only when APB absent
-        case .nmea0183(_, type: "XTE"):     return 30   // XTE only
-        case .nmea2000(pgn: 129283):        return 40   // Cross Track Error
-        case .signalK:                      return 50
-        default:                            return 100
-        }
-    }
+	/// Autopilot / cross-track error. APB is preferred over APA (backward-compat pattern).
+	private static func autopilotRank(_ s: SourceKind) -> Int {
+		switch s {
+		case .nmea0183(_, type: "APB"): return 10  // most complete autopilot sentence
+		case .nmea0183(_, type: "APA"): return 20  // legacy; only when APB absent
+		case .nmea0183(_, type: "XTE"): return 30  // XTE only
+		case .nmea2000(pgn: 129283): return 40  // Cross Track Error
+		case .signalK: return 50
+		default: return 100
+		}
+	}
 
-    private static func navRank(_ s: SourceKind) -> Int {
-        switch s {
-        case .nmea2000(pgn: 129284):            return 10   // Navigation Data
-        case .nmea0183(_, type: "APB"):         return 20
-        case .nmea0183(_, type: "RMB"):         return 30
-        case .nmea0183(_, type: "BWC"),
-             .nmea0183(_, type: "BWR"):         return 40
-        case .signalK:                          return 50
-        default:                                return 100
-        }
-    }
+	private static func navRank(_ s: SourceKind) -> Int {
+		switch s {
+		case .nmea2000(pgn: 129284): return 10  // Navigation Data
+		case .nmea0183(_, type: "APB"): return 20
+		case .nmea0183(_, type: "RMB"): return 30
+		case .nmea0183(_, type: "BWC"),
+			.nmea0183(_, type: "BWR"):
+			return 40
+		case .signalK: return 50
+		default: return 100
+		}
+	}
 
-    /// Atmosphere rank — caller specifies which PGNs and NMEA sentence types are rank-1 and rank-2.
-    private static func atmosphereRank(pgns: [UInt32], nmea0183Types: [String], source: SourceKind) -> Int {
-        switch source {
-        case .nmea2000(let pgn) where pgns.contains(pgn):       return 10
-        case .nmea0183(_, let type) where nmea0183Types.contains(type): return 20
-        case .signalK:                                          return 30
-        default:                                                return 100
-        }
-    }
+	/// Atmosphere rank — caller specifies which PGNs and NMEA sentence types are rank-1 and rank-2.
+	private static func atmosphereRank(pgns: [UInt32], nmea0183Types: [String], source: SourceKind) -> Int {
+		switch source {
+		case .nmea2000(let pgn) where pgns.contains(pgn): return 10
+		case .nmea0183(_, let type) where nmea0183Types.contains(type): return 20
+		case .signalK: return 30
+		default: return 100
+		}
+	}
 
-    /// Pass-through rank for metrics with no conflict (engines, tanks, batteries, etc.).
-    private static func defaultRank(_ s: SourceKind) -> Int {
-        switch s {
-        case .nmea2000:  return 10
-        case .nmea0183:  return 20
-        case .signalK:   return 30
-        default:         return 100
-        }
-    }
+	/// Pass-through rank for metrics with no conflict (engines, tanks, batteries, etc.).
+	private static func defaultRank(_ s: SourceKind) -> Int {
+		switch s {
+		case .nmea2000: return 10
+		case .nmea0183: return 20
+		case .signalK: return 30
+		default: return 100
+		}
+	}
 }
-
 
 // ============================================================
 // MARK: - BoatMetricStore
@@ -559,491 +559,525 @@ private enum PriorityResolver {
 @MainActor
 public final class BoatMetricStore {
 
-    // MARK: Published state
+	// MARK: Published state
 
-    /// All resolved numeric metrics, keyed by canonical name (e.g. `"SOG"`, `"lat"`).
-    public private(set) var metrics: [String: BoatMetric] = [:]
+	/// All resolved numeric metrics, keyed by canonical name (e.g. `"SOG"`, `"lat"`).
+	public private(set) var metrics: [String: BoatMetric] = [:]
 
-    /// AIS targets keyed by MMSI — **other** vessels only.
-    ///
-    /// Own vessel (a VDO report, or a VDM echoing own MMSI) is excluded and kept
-    /// in ``ownShip`` instead. Targets not updated for 10 minutes are considered
-    /// stale (check with ``isStale(_:)``); targets not updated for 30 minutes are
-    /// removed.
-    public private(set) var aisTargets: [Int: AISTarget] = [:]
+	/// AIS targets keyed by MMSI — **other** vessels only.
+	///
+	/// Own vessel (a VDO report, or a VDM echoing own MMSI) is excluded and kept
+	/// in ``ownShip`` instead. Targets not updated for 10 minutes are considered
+	/// stale (check with ``isStale(_:)``); targets not updated for 30 minutes are
+	/// removed.
+	public private(set) var aisTargets: [Int: AISTarget] = [:]
 
-    /// Optional human display names for metric prefixes (e.g. `"battery.0"` →
-    /// `"Lynx 24"`), supplied by sources that carry custom device names such as
-    /// Victron VRM. Consumers may use these to label instruments.
-    public private(set) var labels: [String: String] = [:]
+	/// Optional human display names for metric prefixes (e.g. `"battery.0"` →
+	/// `"Lynx 24"`), supplied by sources that carry custom device names such as
+	/// Victron VRM. Consumers may use these to label instruments.
+	public private(set) var labels: [String: String] = [:]
 
-    /// Merges display names into ``labels`` (existing keys are overwritten).
-    public func setLabels(_ newLabels: [String: String]) {
-        for (key, name) in newLabels { labels[key] = name }
-    }
+	/// Merges display names into ``labels`` (existing keys are overwritten).
+	public func setLabels(_ newLabels: [String: String]) {
+		for (key, name) in newLabels { labels[key] = name }
+	}
 
-    /// Own vessel's latest AIS report, learned from VDO sentences (or a VDM that
-    /// echoes own MMSI). `nil` until own transponder is heard.
-    public private(set) var ownShip: AISTarget?
+	/// The destination waypoint number from PGN 129284 — an index into the
+	/// route waypoint names accumulated from PGN 129285.
+	private var activeWaypointNumber: Int?
+	/// Waypoint names by number, accumulated from PGN 129285 messages.
+	private var routeWaypointNames: [Int: String] = [:]
 
-    /// Own vessel's MMSI, once known, so VDM echoes of ourselves are excluded
-    /// from ``aisTargets``.
-    private var ownMMSI: Int?
+	/// Resolves the active waypoint's display name into `labels["waypoint"]`,
+	/// once both the number (129284) and the names (129285) are known.
+	private func resolveWaypointLabel() {
+		guard let number = activeWaypointNumber,
+			let name = routeWaypointNames[number],
+			labels["waypoint"] != name
+		else { return }
+		labels["waypoint"] = name
+	}
 
-    /// Satellite lists keyed by constellation name.
-    ///
-    /// Keys: `"GPS"`, `"GLONASS"`, `"Galileo"`, `"BeiDou"`, `"QZSS"`,
-    /// `"NavIC"`, `"GNSS"`. Replaced wholesale on each GSV report.
-    public private(set) var satellites: [String: [SatelliteInfo]] = [:]
+	/// Own vessel's latest AIS report, learned from VDO sentences (or a VDM that
+	/// echoes own MMSI). `nil` until own transponder is heard.
+	public private(set) var ownShip: AISTarget?
 
-    // Wind histories
-    /// True wind speed — 5 s / 1 min two-tier history.
-    public private(set) var windTWS     = TieredHistory(isAngle: false)
-    /// True wind direction — circular mean, 5 s / 1 min two-tier history.
-    public private(set) var windTWD     = TieredHistory(isAngle: true)
-    /// Apparent wind speed — 5 s / 1 min two-tier history.
-    public private(set) var windAWS     = TieredHistory(isAngle: false)
-    /// Apparent wind angle — circular mean, 5 s / 1 min two-tier history.
-    public private(set) var windAWA     = TieredHistory(isAngle: true)
+	/// Own vessel's MMSI, once known, so VDM echoes of ourselves are excluded
+	/// from ``aisTargets``.
+	private var ownMMSI: Int?
 
-    // Navigation histories
-    /// Speed over ground — 5 s / 1 min two-tier history.
-    public private(set) var sog         = TieredHistory(isAngle: false)
-    /// Course over ground — circular mean, 5 s / 1 min two-tier history.
-    public private(set) var cog         = TieredHistory(isAngle: true)
-    /// Water depth — 5 s / 1 min two-tier history.
-    public private(set) var depthHist   = TieredHistory(isAngle: false)
-    /// Water temperature — 5 s / 1 min two-tier history.
-    public private(set) var waterTemp   = TieredHistory(isAngle: false)
+	/// Satellite lists keyed by constellation name.
+	///
+	/// Keys: `"GPS"`, `"GLONASS"`, `"Galileo"`, `"BeiDou"`, `"QZSS"`,
+	/// `"NavIC"`, `"GNSS"`. Replaced wholesale on each GSV report.
+	public private(set) var satellites: [String: [SatelliteInfo]] = [:]
 
-    // Pressure history
-    /// Atmospheric pressure — 30 min samples over 48 hours.
-    public private(set) var pressure    = PressureHistory()
+	// Wind histories
+	/// True wind speed — 5 s / 1 min two-tier history.
+	public private(set) var windTWS = TieredHistory(isAngle: false)
+	/// True wind direction — circular mean, 5 s / 1 min two-tier history.
+	public private(set) var windTWD = TieredHistory(isAngle: true)
+	/// Apparent wind speed — 5 s / 1 min two-tier history.
+	public private(set) var windAWS = TieredHistory(isAngle: false)
+	/// Apparent wind angle — circular mean, 5 s / 1 min two-tier history.
+	public private(set) var windAWA = TieredHistory(isAngle: true)
 
-    // MARK: Private state
+	// Navigation histories
+	/// Speed over ground — 5 s / 1 min two-tier history.
+	public private(set) var sog = TieredHistory(isAngle: false)
+	/// Course over ground — circular mean, 5 s / 1 min two-tier history.
+	public private(set) var cog = TieredHistory(isAngle: true)
+	/// Water depth — 5 s / 1 min two-tier history.
+	public private(set) var depthHist = TieredHistory(isAngle: false)
+	/// Water temperature — 5 s / 1 min two-tier history.
+	public private(set) var waterTemp = TieredHistory(isAngle: false)
 
-    private let appGroupID: String?
-    private var collector     = FrameCollector()
-    private var currentSource = SourceKind.unknown
-    private var aisLastSeen:  [Int: Date] = [:]
-    private var timerTask:    Task<Void, Never>?
+	// Pressure history
+	/// Atmospheric pressure — 30 min samples over 48 hours.
+	public private(set) var pressure = PressureHistory()
 
-    // MARK: Init
+	// MARK: Private state
 
-    /// Creates a `BoatMetricStore`.
-    ///
-    /// - Parameter appGroupID: An App Group identifier. When non-nil,
-    ///   a compact JSON snapshot is written to `UserDefaults(suiteName:)`
-    ///   after every flush so that a widget or extension can read live data.
-    ///   Has no effect on non-Darwin platforms.
-    public init(appGroupID: String? = nil) {
-        self.appGroupID = appGroupID
-    }
+	private let appGroupID: String?
+	private var collector = FrameCollector()
+	private var currentSource = SourceKind.unknown
+	private var aisLastSeen: [Int: Date] = [:]
+	private var timerTask: Task<Void, Never>?
 
-    // MARK: Lifecycle
+	// MARK: Init
 
-    /// Starts the 1-second flush timer.
-    ///
-    /// Call this once after creating the store. Calling it again while the
-    /// timer is already running has no effect.
-    public func start() {
-        guard timerTask == nil else { return }
-        timerTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
-                guard !Task.isCancelled, let self else { break }
-                self.tick()   // Task inherits @MainActor from start(); no hop needed
-            }
-        }
-    }
+	/// Creates a `BoatMetricStore`.
+	///
+	/// - Parameter appGroupID: An App Group identifier. When non-nil,
+	///   a compact JSON snapshot is written to `UserDefaults(suiteName:)`
+	///   after every flush so that a widget or extension can read live data.
+	///   Has no effect on non-Darwin platforms.
+	public init(appGroupID: String? = nil) {
+		self.appGroupID = appGroupID
+	}
 
-    /// Stops the flush timer.
-    ///
-    /// In-flight frames accumulated since the last flush are discarded.
-    /// Call ``start()`` to resume.
-    public func stop() {
-        timerTask?.cancel()
-        timerTask = nil
-    }
+	// MARK: Lifecycle
 
-    /// Clears all published state — metrics and AIS targets (including own ship)
-    /// — so values from a previous source don't linger when switching, hard-
-    /// reconnecting or disconnecting.
-    ///
-    /// The pending 1-second window is reset too: without this, frames already
-    /// collected but not yet flushed would reappear on the next tick, so values
-    /// would briefly come back after a disconnect.
-    public func clear() {
-        collector.reset()
-        metrics.removeAll()
-        headingDerivedFromCOG = false
-        clearAIS()
-    }
+	/// Starts the 1-second flush timer.
+	///
+	/// Call this once after creating the store. Calling it again while the
+	/// timer is already running has no effect.
+	public func start() {
+		guard timerTask == nil else { return }
+		timerTask = Task { [weak self] in
+			while !Task.isCancelled {
+				try? await Task.sleep(for: .seconds(1))
+				guard !Task.isCancelled, let self else { break }
+				self.tick()  // Task inherits @MainActor from start(); no hop needed
+			}
+		}
+	}
 
-    /// Clears the AIS state only — every target, the staleness history and the
-    /// own-ship record. Use when switching source so another feed's vessels don't
-    /// linger, without disturbing the current metrics.
-    public func clearAIS() {
-        aisTargets.removeAll()
-        aisLastSeen.removeAll()
-        ownShip = nil
-        ownMMSI = nil
-    }
+	/// Stops the flush timer.
+	///
+	/// In-flight frames accumulated since the last flush are discarded.
+	/// Call ``start()`` to resume.
+	public func stop() {
+		timerTask?.cancel()
+		timerTask = nil
+	}
 
-    // MARK: Feeding data
+	/// Clears all published state — metrics and AIS targets (including own ship)
+	/// — so values from a previous source don't linger when switching, hard-
+	/// reconnecting or disconnecting.
+	///
+	/// The pending 1-second window is reset too: without this, frames already
+	/// collected but not yet flushed would reappear on the next tick, so values
+	/// would briefly come back after a disconnect.
+	public func clear() {
+		collector.reset()
+		metrics.removeAll()
+		headingDerivedFromCOG = false
+		clearAIS()
+	}
 
-    /// Feeds a single frame into the current 1-second window.
-    ///
-    /// Frames accumulate until the next timer tick, at which point the
-    /// priority resolver picks winners and publishes results.
-    /// Prefer ``pipe(_:)`` when consuming an async stream.
-    public func feed(_ frame: NMEAFrame) {
-        switch frame {
-        case .nmea0183(_, let talker, let type, _):
-            currentSource = .nmea0183(talker: talker, type: type)
+	/// Clears the AIS state only — every target, the staleness history and the
+	/// own-ship record. Use when switching source so another feed's vessels don't
+	/// linger, without disturbing the current metrics.
+	public func clearAIS() {
+		aisTargets.removeAll()
+		aisLastSeen.removeAll()
+		ownShip = nil
+		ownMMSI = nil
+	}
 
-        case .nmea2000(let pgn, _, _, _):
-            currentSource = .nmea2000(pgn: pgn)
+	// MARK: Feeding data
 
-        case .metric(let m):
-            collector.add(TaggedMetric(metric: m, source: currentSource))
+	/// Feeds a single frame into the current 1-second window.
+	///
+	/// Frames accumulate until the next timer tick, at which point the
+	/// priority resolver picks winners and publishes results.
+	/// Prefer ``pipe(_:)`` when consuming an async stream.
+	public func feed(_ frame: NMEAFrame) {
+		switch frame {
+		case .nmea0183(_, let talker, let type, let fields):
+			currentSource = .nmea0183(talker: talker, type: type)
+			// Routing sentences carry the destination waypoint name — a string,
+			// so it travels through the labels side channel, not as a metric.
+			if let waypoint = NMEA0183Parser.waypointName(type: type, fields: fields),
+				labels["waypoint"] != waypoint
+			{
+				labels["waypoint"] = waypoint
+			}
 
-        case .aisTarget(let t):
-            collector.aisTargets.append(t)
+		case .nmea2000(let pgn, _, _, let data):
+			currentSource = .nmea2000(pgn: pgn)
+			// Like the 0183 path above: route and waypoint names are strings,
+			// so they travel through the labels side channel.
+			if pgn == 129_284 {
+				if let destination = NMEA2000Decoder.navigationWaypointNumbers(data).destination {
+					activeWaypointNumber = destination
+					resolveWaypointLabel()
+				}
+			} else if pgn == 129_285, let info = NMEA2000Decoder.routeInfo(data) {
+				if let route = info.route, labels["route"] != route { labels["route"] = route }
+				routeWaypointNames.merge(info.waypoints) { _, new in new }
+				resolveWaypointLabel()
+			}
 
-        case .gsvReport(let constellation, let inView, let sats):
-            collector.gsvReports.append((constellation, inView, sats))
+		case .metric(let m):
+			collector.add(TaggedMetric(metric: m, source: currentSource))
 
-        case .invalidChecksum, .unknown:
-            currentSource = .unknown
-        }
-    }
+		case .aisTarget(let t):
+			collector.aisTargets.append(t)
 
-    /// Feeds a frame, tagging any `.metric` case as a **Signal K** source
-    /// (always lowest priority in the resolution tables).
-    ///
-    /// Use this when piping the output of a ``SignalKClient``:
-    ///
-    /// ```swift
-    /// store.pipeSignalK(signalKClient.subscribe())
-    /// ```
-    public func feedSignalK(_ frame: NMEAFrame) {
-        if case .metric(let m) = frame {
-            collector.add(TaggedMetric(metric: m, source: .signalK))
-        } else {
-            feed(frame)
-        }
-    }
+		case .gsvReport(let constellation, let inView, let sats):
+			collector.gsvReports.append((constellation, inView, sats))
 
-    /// Feeds a single ``BoatMetric`` directly into the current window.
-    ///
-    /// The metric is tagged as a Signal K source (lowest priority), so any
-    /// NMEA 0183 or NMEA 2000 value for the same metric name takes precedence.
-    /// Intended for on-device sensor data (``DeviceSensors``) or one-off VRM
-    /// REST responses:
-    ///
-    /// ```swift
-    /// let batch = try await vrmClient.metrics(siteId: id)
-    /// store.feedMetrics(batch)
-    /// ```
-    public func feedMetric(_ metric: BoatMetric) {
-        collector.add(TaggedMetric(metric: metric, source: .signalK))
-    }
+		case .invalidChecksum, .unknown:
+			currentSource = .unknown
+		}
+	}
 
-    /// Feeds a batch of ``BoatMetric`` values into the current window.
-    ///
-    /// Convenience wrapper around ``feedMetric(_:)`` — useful for one VRM poll
-    /// tick inside a manual poll loop.
-    public func feedMetrics(_ metrics: [BoatMetric]) {
-        for m in metrics { feedMetric(m) }
-    }
+	/// Feeds a frame, tagging any `.metric` case as a **Signal K** source
+	/// (always lowest priority in the resolution tables).
+	///
+	/// Use this when piping the output of a ``SignalKClient``:
+	///
+	/// ```swift
+	/// store.pipeSignalK(signalKClient.subscribe())
+	/// ```
+	public func feedSignalK(_ frame: NMEAFrame) {
+		if case .metric(let m) = frame {
+			collector.add(TaggedMetric(metric: m, source: .signalK))
+		} else {
+			feed(frame)
+		}
+	}
 
-    // MARK: Async stream piping
+	/// Feeds a single ``BoatMetric`` directly into the current window.
+	///
+	/// The metric is tagged as a Signal K source (lowest priority), so any
+	/// NMEA 0183 or NMEA 2000 value for the same metric name takes precedence.
+	/// Intended for on-device sensor data (``DeviceSensors``) or one-off VRM
+	/// REST responses:
+	///
+	/// ```swift
+	/// let batch = try await vrmClient.metrics(siteId: id)
+	/// store.feedMetrics(batch)
+	/// ```
+	public func feedMetric(_ metric: BoatMetric) {
+		collector.add(TaggedMetric(metric: metric, source: .signalK))
+	}
 
-    /// Consumes an async stream of frames, feeding each into the store.
-    ///
-    /// The returned `Task` runs until the stream ends or is cancelled.
-    /// The store's flush timer is independent — call ``start()`` separately.
-    ///
-    /// - Returns: A `Task` that you can cancel to stop consumption.
-    @discardableResult
-    public nonisolated func pipe<S: AsyncSequence & Sendable>(_ stream: S) -> Task<Void, any Error>
-        where S.Element == NMEAFrame
-    {
-        // nonisolated so the Task runs in the generic executor and iterates the
-        // stream without pinning the main actor. Each frame hops to MainActor
-        // only for the feed() call.
-        Task { [weak self] in
-            for try await frame in stream {
-                guard let store = self else { break }
-                await store.feed(frame)
-            }
-        }
-    }
+	/// Feeds a batch of ``BoatMetric`` values into the current window.
+	///
+	/// Convenience wrapper around ``feedMetric(_:)`` — useful for one VRM poll
+	/// tick inside a manual poll loop.
+	public func feedMetrics(_ metrics: [BoatMetric]) {
+		for m in metrics { feedMetric(m) }
+	}
 
-    /// Consumes an async stream of frames, tagging all `.metric` frames as
-    /// Signal K (lowest priority). Use this for ``SignalKClient`` streams.
-    ///
-    /// - Returns: A `Task` that you can cancel to stop consumption.
-    @discardableResult
-    public nonisolated func pipeSignalK<S: AsyncSequence & Sendable>(_ stream: S) -> Task<Void, any Error>
-        where S.Element == NMEAFrame
-    {
-        Task { [weak self] in
-            for try await frame in stream {
-                guard let store = self else { break }
-                await store.feedSignalK(frame)
-            }
-        }
-    }
+	// MARK: Async stream piping
 
-    /// Consumes an async stream of raw ``BoatMetric`` values, feeding each
-    /// into the store as a Signal K source (lowest priority).
-    ///
-    /// Use this for ``DeviceSensors``, which emits `BoatMetric` directly
-    /// rather than `NMEAFrame`:
-    ///
-    /// ```swift
-    /// let sensors = DeviceSensors()
-    /// store.pipeMetrics(sensors.stream())
-    /// ```
-    ///
-    /// - Returns: A `Task` that you can cancel to stop consumption.
-    @discardableResult
-    public nonisolated func pipeMetrics<S: AsyncSequence & Sendable>(_ stream: S) -> Task<Void, any Error>
-        where S.Element == BoatMetric
-    {
-        Task { [weak self] in
-            for try await metric in stream {
-                guard let store = self else { break }
-                await store.feedMetric(metric)
-            }
-        }
-    }
+	/// Consumes an async stream of frames, feeding each into the store.
+	///
+	/// The returned `Task` runs until the stream ends or is cancelled.
+	/// The store's flush timer is independent — call ``start()`` separately.
+	///
+	/// - Returns: A `Task` that you can cancel to stop consumption.
+	@discardableResult
+	public nonisolated func pipe<S: AsyncSequence & Sendable>(_ stream: S) -> Task<Void, any Error>
+	where S.Element == NMEAFrame {
+		// nonisolated so the Task runs in the generic executor and iterates the
+		// stream without pinning the main actor. Each frame hops to MainActor
+		// only for the feed() call.
+		Task { [weak self] in
+			for try await frame in stream {
+				guard let store = self else { break }
+				await store.feed(frame)
+			}
+		}
+	}
 
-    // MARK: AIS staleness
+	/// Consumes an async stream of frames, tagging all `.metric` frames as
+	/// Signal K (lowest priority). Use this for ``SignalKClient`` streams.
+	///
+	/// - Returns: A `Task` that you can cancel to stop consumption.
+	@discardableResult
+	public nonisolated func pipeSignalK<S: AsyncSequence & Sendable>(_ stream: S) -> Task<Void, any Error>
+	where S.Element == NMEAFrame {
+		Task { [weak self] in
+			for try await frame in stream {
+				guard let store = self else { break }
+				await store.feedSignalK(frame)
+			}
+		}
+	}
 
-    /// Returns `true` if `mmsi` has not been updated for 10 minutes.
-    public func isStale(_ mmsi: Int) -> Bool {
-        guard let date = aisLastSeen[mmsi] else { return true }
-        return Date().timeIntervalSince(date) > 600
-    }
+	/// Consumes an async stream of raw ``BoatMetric`` values, feeding each
+	/// into the store as a Signal K source (lowest priority).
+	///
+	/// Use this for ``DeviceSensors``, which emits `BoatMetric` directly
+	/// rather than `NMEAFrame`:
+	///
+	/// ```swift
+	/// let sensors = DeviceSensors()
+	/// store.pipeMetrics(sensors.stream())
+	/// ```
+	///
+	/// - Returns: A `Task` that you can cancel to stop consumption.
+	@discardableResult
+	public nonisolated func pipeMetrics<S: AsyncSequence & Sendable>(_ stream: S) -> Task<Void, any Error>
+	where S.Element == BoatMetric {
+		Task { [weak self] in
+			for try await metric in stream {
+				guard let store = self else { break }
+				await store.feedMetric(metric)
+			}
+		}
+	}
 
-    // MARK: Internal flush
+	// MARK: AIS staleness
 
-    private func tick() {
-        let now = Date()
-        flush(at: now)
-        pruneAISTargets(now: now)
-    }
+	/// Returns `true` if `mmsi` has not been updated for 10 minutes.
+	public func isStale(_ mmsi: Int) -> Bool {
+		guard let date = aisLastSeen[mmsi] else { return true }
+		return Date().timeIntervalSince(date) > 600
+	}
 
-    /// Whether `metrics["HDG.true"]` currently holds a COG-derived fallback
-    /// heading (used as a last resort when no NMEA/NMEA 2000 heading and no
-    /// device compass are available).
-    private var headingDerivedFromCOG = false
+	// MARK: Internal flush
 
-    private func flush(at now: Date) {
-        let (newMetrics, newAIS, newGSV) = (
-            collector.candidates.values.map(\.metric),
-            collector.aisTargets,
-            collector.gsvReports
-        )
-        collector.reset()
-        currentSource = .unknown
+	private func tick() {
+		let now = Date()
+		flush(at: now)
+		pruneAISTargets(now: now)
+	}
 
-        // Drop the previous flush's COG-derived heading so it can never mask a
-        // real heading source resolved this flush.
-        if headingDerivedFromCOG {
-            metrics["HDG.true"] = nil
-            headingDerivedFromCOG = false
-        }
+	/// Whether `metrics["HDG.true"]` currently holds a COG-derived fallback
+	/// heading (used as a last resort when no NMEA/NMEA 2000 heading and no
+	/// device compass are available).
+	private var headingDerivedFromCOG = false
 
-        // Merge metrics and feed histories.
-        for m in newMetrics {
-            metrics[m.name] = m
-            feedHistory(name: m.name, value: m.value, at: now)
-        }
+	private func flush(at now: Date) {
+		let (newMetrics, newAIS, newGSV) = (
+			collector.candidates.values.map(\.metric),
+			collector.aisTargets,
+			collector.gsvReports
+		)
+		collector.reset()
+		currentSource = .unknown
 
-        // Last-resort heading: when neither a NMEA/NMEA 2000 heading nor the
-        // device compass provides HDG, fall back to COG (course over ground) so
-        // consumers always have a heading. It is refreshed on every flush and is
-        // automatically superseded as soon as a real heading source appears.
-        if metrics["HDG.true"] == nil,
-           metrics["HDG.magnetic"] == nil,
-           let cog = metrics["COG"], cog.value >= 0 {
-            metrics["HDG.true"] = BoatMetric(
-                name: "HDG.true", value: cog.value, unit: cog.unit, timestamp: cog.timestamp
-            )
-            headingDerivedFromCOG = true
-        }
+		// Drop the previous flush's COG-derived heading so it can never mask a
+		// real heading source resolved this flush.
+		if headingDerivedFromCOG {
+			metrics["HDG.true"] = nil
+			headingDerivedFromCOG = false
+		}
 
-        // Merge AIS targets (preserve static fields from older reports).
-        for target in newAIS {
-            mergeAIS(target, at: now)
-        }
+		// Merge metrics and feed histories.
+		for m in newMetrics {
+			metrics[m.name] = m
+			feedHistory(name: m.name, value: m.value, at: now)
+		}
 
-        // Replace satellite lists wholesale.
-        for report in newGSV {
-            satellites[report.constellation] = report.satellites
-        }
+		// Last-resort heading: when neither a NMEA/NMEA 2000 heading nor the
+		// device compass provides HDG, fall back to COG (course over ground) so
+		// consumers always have a heading. It is refreshed on every flush and is
+		// automatically superseded as soon as a real heading source appears.
+		if metrics["HDG.true"] == nil,
+			metrics["HDG.magnetic"] == nil,
+			let cog = metrics["COG"], cog.value >= 0
+		{
+			metrics["HDG.true"] = BoatMetric(
+				name: "HDG.true", value: cog.value, unit: cog.unit, timestamp: cog.timestamp
+			)
+			headingDerivedFromCOG = true
+		}
 
-#if canImport(Darwin)
-        writeAppGroupSnapshot(at: now)
-#endif
-    }
+		// Merge AIS targets (preserve static fields from older reports).
+		for target in newAIS {
+			mergeAIS(target, at: now)
+		}
 
-    private func feedHistory(name: String, value: Double, at now: Date) {
-        switch name {
-        case "TWS":                 windTWS.add(value, at: now)
-        case "TWD":                 windTWD.add(value, at: now)
-        case "AWS":                 windAWS.add(value, at: now)
-        case "AWA":                 windAWA.add(value, at: now)
-        case "SOG":                 sog.add(value, at: now)
-        case "COG":                 cog.add(value, at: now)
-        case "depth":               depthHist.add(value, at: now)
-        case "temperature.water":   waterTemp.add(value, at: now)
-        case "pressure.atmospheric": pressure.add(value, at: now)
-        default:                    break
-        }
-    }
+		// Replace satellite lists wholesale.
+		for report in newGSV {
+			satellites[report.constellation] = report.satellites
+		}
 
-    /// Pre-fills a metric's curve history with synthetic past samples, so graphs
-    /// are populated the moment a session starts — useful for a simulator that
-    /// begins part-way through a passage. Any existing history for the metric is
-    /// replaced; the live feed then continues appending after the seeded tail.
-    ///
-    /// Samples are sorted oldest-first and fed through the same tiered buffers as
-    /// live data, so they must be spaced at least the tier's sample interval apart
-    /// (5 s for wind/SOG/COG curves, 30 min for pressure) to land as distinct
-    /// points.
-    ///
-    /// - Parameters:
-    ///   - name: The metric whose history to seed (e.g. `TWS`, `pressure.atmospheric`).
-    ///   - samples: The past `(timestamp, value)` pairs to seed.
-    public func seedHistory(name: String, samples: [(at: Date, value: Double)]) {
-        resetHistory(name: name)
-        for sample in samples.sorted(by: { $0.at < $1.at }) {
-            feedHistory(name: name, value: sample.value, at: sample.at)
-        }
-    }
+		#if canImport(Darwin)
+			writeAppGroupSnapshot(at: now)
+		#endif
+	}
 
-    /// Empties the history buffer backing a metric, so seeding starts from clean
-    /// axes without doubling up on a reconnect.
-    private func resetHistory(name: String) {
-        switch name {
-        case "TWS":                  windTWS = TieredHistory(isAngle: false)
-        case "TWD":                  windTWD = TieredHistory(isAngle: true)
-        case "AWS":                  windAWS = TieredHistory(isAngle: false)
-        case "AWA":                  windAWA = TieredHistory(isAngle: true)
-        case "SOG":                  sog = TieredHistory(isAngle: false)
-        case "COG":                  cog = TieredHistory(isAngle: true)
-        case "depth":                depthHist = TieredHistory(isAngle: false)
-        case "temperature.water":    waterTemp = TieredHistory(isAngle: false)
-        case "pressure.atmospheric": pressure = PressureHistory()
-        default:                     break
-        }
-    }
+	private func feedHistory(name: String, value: Double, at now: Date) {
+		switch name {
+		case "TWS": windTWS.add(value, at: now)
+		case "TWD": windTWD.add(value, at: now)
+		case "AWS": windAWS.add(value, at: now)
+		case "AWA": windAWA.add(value, at: now)
+		case "SOG": sog.add(value, at: now)
+		case "COG": cog.add(value, at: now)
+		case "depth": depthHist.add(value, at: now)
+		case "temperature.water": waterTemp.add(value, at: now)
+		case "pressure.atmospheric": pressure.add(value, at: now)
+		default: break
+		}
+	}
 
-    private func mergeAIS(_ incoming: AISTarget, at now: Date) {
-        // Reject implausible decodes: MMSI is a 9-digit identifier, so anything
-        // outside 1…999 999 999 is a corrupt/misaligned message.
-        guard (1...999_999_999).contains(incoming.mmsi) else { return }
+	/// Pre-fills a metric's curve history with synthetic past samples, so graphs
+	/// are populated the moment a session starts — useful for a simulator that
+	/// begins part-way through a passage. Any existing history for the metric is
+	/// replaced; the live feed then continues appending after the seeded tail.
+	///
+	/// Samples are sorted oldest-first and fed through the same tiered buffers as
+	/// live data, so they must be spaced at least the tier's sample interval apart
+	/// (5 s for wind/SOG/COG curves, 30 min for pressure) to land as distinct
+	/// points.
+	///
+	/// - Parameters:
+	///   - name: The metric whose history to seed (e.g. `TWS`, `pressure.atmospheric`).
+	///   - samples: The past `(timestamp, value)` pairs to seed.
+	public func seedHistory(name: String, samples: [(at: Date, value: Double)]) {
+		resetHistory(name: name)
+		for sample in samples.sorted(by: { $0.at < $1.at }) {
+			feedHistory(name: name, value: sample.value, at: sample.at)
+		}
+	}
 
-        // Own vessel (VDO, or a VDM echoing our own MMSI) is not an "other
-        // vessel": keep it in `ownShip` and out of `aisTargets`.
-        if incoming.isOwnShip { ownMMSI = incoming.mmsi }
-        if let own = ownMMSI, incoming.mmsi == own {
-            ownShip = incoming
-            aisTargets.removeValue(forKey: incoming.mmsi)  // drop any earlier add
-            aisLastSeen.removeValue(forKey: incoming.mmsi)
-            return
-        }
+	/// Empties the history buffer backing a metric, so seeding starts from clean
+	/// axes without doubling up on a reconnect.
+	private func resetHistory(name: String) {
+		switch name {
+		case "TWS": windTWS = TieredHistory(isAngle: false)
+		case "TWD": windTWD = TieredHistory(isAngle: true)
+		case "AWS": windAWS = TieredHistory(isAngle: false)
+		case "AWA": windAWA = TieredHistory(isAngle: true)
+		case "SOG": sog = TieredHistory(isAngle: false)
+		case "COG": cog = TieredHistory(isAngle: true)
+		case "depth": depthHist = TieredHistory(isAngle: false)
+		case "temperature.water": waterTemp = TieredHistory(isAngle: false)
+		case "pressure.atmospheric": pressure = PressureHistory()
+		default: break
+		}
+	}
 
-        aisLastSeen[incoming.mmsi] = now
+	private func mergeAIS(_ incoming: AISTarget, at now: Date) {
+		// Reject implausible decodes: MMSI is a 9-digit identifier, so anything
+		// outside 1…999 999 999 is a corrupt/misaligned message.
+		guard (1...999_999_999).contains(incoming.mmsi) else { return }
 
-        guard let existing = aisTargets[incoming.mmsi] else {
-            aisTargets[incoming.mmsi] = incoming
-            return
-        }
+		// Own vessel (VDO, or a VDM echoing our own MMSI) is not an "other
+		// vessel": keep it in `ownShip` and out of `aisTargets`.
+		if incoming.isOwnShip { ownMMSI = incoming.mmsi }
+		if let own = ownMMSI, incoming.mmsi == own {
+			ownShip = incoming
+			aisTargets.removeValue(forKey: incoming.mmsi)  // drop any earlier add
+			aisLastSeen.removeValue(forKey: incoming.mmsi)
+			return
+		}
 
-        // Position reports (msg 1/2/3/18) carry no static data — preserve it
-        // from the last static/voyage report (msg 5/24).
-        aisTargets[incoming.mmsi] = AISTarget(
-            mmsi:              incoming.mmsi,
-            messageType:       incoming.messageType,
-            channel:           incoming.channel,
-            latitude:          incoming.latitude          ?? existing.latitude,
-            longitude:         incoming.longitude         ?? existing.longitude,
-            speedOverGround:   incoming.speedOverGround   ?? existing.speedOverGround,
-            courseOverGround:  incoming.courseOverGround  ?? existing.courseOverGround,
-            trueHeading:       incoming.trueHeading       ?? existing.trueHeading,
-            rateOfTurn:        incoming.rateOfTurn        ?? existing.rateOfTurn,
-            positionAccuracy:  incoming.positionAccuracy,
-            raim:              incoming.raim,
-            navigationStatus:  incoming.navigationStatus  ?? existing.navigationStatus,
-            maneuverIndicator: incoming.maneuverIndicator ?? existing.maneuverIndicator,
-            shipName:          incoming.shipName          ?? existing.shipName,
-            callsign:          incoming.callsign          ?? existing.callsign,
-            shipType:          incoming.shipType          ?? existing.shipType,
-            imoNumber:         incoming.imoNumber         ?? existing.imoNumber,
-            destination:       incoming.destination       ?? existing.destination,
-            draught:           incoming.draught           ?? existing.draught,
-            navAidType:        incoming.navAidType        ?? existing.navAidType,
-            altitude:          incoming.altitude          ?? existing.altitude
-        )
-    }
+		aisLastSeen[incoming.mmsi] = now
 
-    private func pruneAISTargets(now: Date) {
-        let removeBefore = now.addingTimeInterval(-1800)  // 30 min
-        for mmsi in aisLastSeen.keys {
-            guard let date = aisLastSeen[mmsi], date < removeBefore else { continue }
-            aisTargets.removeValue(forKey: mmsi)
-            aisLastSeen.removeValue(forKey: mmsi)
-        }
-    }
+		guard let existing = aisTargets[incoming.mmsi] else {
+			aisTargets[incoming.mmsi] = incoming
+			return
+		}
 
-    // MARK: AppGroup / widget sharing (Darwin only)
+		// Position reports (msg 1/2/3/18) carry no static data — preserve it
+		// from the last static/voyage report (msg 5/24).
+		aisTargets[incoming.mmsi] = AISTarget(
+			mmsi: incoming.mmsi,
+			messageType: incoming.messageType,
+			channel: incoming.channel,
+			latitude: incoming.latitude ?? existing.latitude,
+			longitude: incoming.longitude ?? existing.longitude,
+			speedOverGround: incoming.speedOverGround ?? existing.speedOverGround,
+			courseOverGround: incoming.courseOverGround ?? existing.courseOverGround,
+			trueHeading: incoming.trueHeading ?? existing.trueHeading,
+			rateOfTurn: incoming.rateOfTurn ?? existing.rateOfTurn,
+			positionAccuracy: incoming.positionAccuracy,
+			raim: incoming.raim,
+			navigationStatus: incoming.navigationStatus ?? existing.navigationStatus,
+			maneuverIndicator: incoming.maneuverIndicator ?? existing.maneuverIndicator,
+			shipName: incoming.shipName ?? existing.shipName,
+			callsign: incoming.callsign ?? existing.callsign,
+			shipType: incoming.shipType ?? existing.shipType,
+			imoNumber: incoming.imoNumber ?? existing.imoNumber,
+			destination: incoming.destination ?? existing.destination,
+			draught: incoming.draught ?? existing.draught,
+			navAidType: incoming.navAidType ?? existing.navAidType,
+			altitude: incoming.altitude ?? existing.altitude
+		)
+	}
 
-#if canImport(Darwin)
-    private func writeAppGroupSnapshot(at now: Date) {
-        guard let id = appGroupID,
-              let defaults = UserDefaults(suiteName: id) else { return }
+	private func pruneAISTargets(now: Date) {
+		let removeBefore = now.addingTimeInterval(-1800)  // 30 min
+		for mmsi in aisLastSeen.keys {
+			guard let date = aisLastSeen[mmsi], date < removeBefore else { continue }
+			aisTargets.removeValue(forKey: mmsi)
+			aisLastSeen.removeValue(forKey: mmsi)
+		}
+	}
 
-        // Flat metric values dict (name → Double).
-        var flat: [String: Double] = [:]
-        for (k, m) in metrics { flat[k] = m.value }
-        defaults.set(flat, forKey: "boattools.metrics")
+	// MARK: AppGroup / widget sharing (Darwin only)
 
-        // History arrays encoded as JSON Data.
-        let encoder = JSONEncoder()
-        func encodeHistory(_ samples: [TimedSample]) -> Data? {
-            try? encoder.encode(samples)
-        }
+	#if canImport(Darwin)
+		private func writeAppGroupSnapshot(at now: Date) {
+			guard let id = appGroupID,
+				let defaults = UserDefaults(suiteName: id)
+			else { return }
 
-        if let d = encodeHistory(windTWS.recent.chronological) {
-            defaults.set(d, forKey: "boattools.wind.recent.tws")
-        }
-        if let d = encodeHistory(windTWD.recent.chronological) {
-            defaults.set(d, forKey: "boattools.wind.recent.twd")
-        }
-        if let d = encodeHistory(windTWS.long.chronological) {
-            defaults.set(d, forKey: "boattools.wind.long.tws")
-        }
-        if let d = encodeHistory(windTWD.long.chronological) {
-            defaults.set(d, forKey: "boattools.wind.long.twd")
-        }
-        if let d = encodeHistory(sog.recent.chronological) {
-            defaults.set(d, forKey: "boattools.nav.recent.sog")
-        }
-        if let d = encodeHistory(cog.recent.chronological) {
-            defaults.set(d, forKey: "boattools.nav.recent.cog")
-        }
-        if let d = encodeHistory(pressure.samples.chronological) {
-            defaults.set(d, forKey: "boattools.pressure")
-        }
+			// Flat metric values dict (name → Double).
+			var flat: [String: Double] = [:]
+			for (k, m) in metrics { flat[k] = m.value }
+			defaults.set(flat, forKey: "boattools.metrics")
 
-        // Flush timestamp in ISO 8601.
-        defaults.set(ISO8601DateFormatter().string(from: now), forKey: "boattools.updatedAt")
-    }
-#endif
+			// History arrays encoded as JSON Data.
+			let encoder = JSONEncoder()
+			func encodeHistory(_ samples: [TimedSample]) -> Data? {
+				try? encoder.encode(samples)
+			}
+
+			if let d = encodeHistory(windTWS.recent.chronological) {
+				defaults.set(d, forKey: "boattools.wind.recent.tws")
+			}
+			if let d = encodeHistory(windTWD.recent.chronological) {
+				defaults.set(d, forKey: "boattools.wind.recent.twd")
+			}
+			if let d = encodeHistory(windTWS.long.chronological) {
+				defaults.set(d, forKey: "boattools.wind.long.tws")
+			}
+			if let d = encodeHistory(windTWD.long.chronological) {
+				defaults.set(d, forKey: "boattools.wind.long.twd")
+			}
+			if let d = encodeHistory(sog.recent.chronological) {
+				defaults.set(d, forKey: "boattools.nav.recent.sog")
+			}
+			if let d = encodeHistory(cog.recent.chronological) {
+				defaults.set(d, forKey: "boattools.nav.recent.cog")
+			}
+			if let d = encodeHistory(pressure.samples.chronological) {
+				defaults.set(d, forKey: "boattools.pressure")
+			}
+
+			// Flush timestamp in ISO 8601.
+			defaults.set(ISO8601DateFormatter().string(from: now), forKey: "boattools.updatedAt")
+		}
+	#endif
 }
