@@ -163,9 +163,10 @@ jobs:
 
   # Windows is a development-only artefact: it ships with the rolling "latest"
   # lab build, never with a tagged release (which stays macOS + Linux). libcurl
-  # and zlib are linked statically (vcpkg static-md triplet), and the zip
-  # bundles the Swift runtime DLLs next to the exe, so it runs on machines
-  # with no Swift toolchain installed.
+  # and zlib are linked statically (vcpkg static-md triplet), but — like the
+  # Linux build — the Swift runtime is a dependency, not bundled: the target
+  # installs the Swift runtime plus the Visual C++ redistributable (see the
+  # README "Runtime requirements" section).
   build-windows:
     name: Build (windows)
     if: github.ref_type != 'tag'
@@ -202,23 +203,11 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          # A Swift executable loads the Swift runtime DLLs dynamically;
-          # end-user machines have no Swift toolchain, so bundle them.
-          # gha-setup-swift installs per-user (%LocalAppData%\Programs\Swift);
-          # the machine-wide Program Files location is kept as a fallback.
-          $runtimeBin = @(
-            "$env:LOCALAPPDATA\Programs\Swift\Runtimes\*\usr\bin",
-            "$env:ProgramFiles\Swift\Runtimes\*\usr\bin"
-          ) | ForEach-Object { Resolve-Path $_ -ErrorAction SilentlyContinue } |
-            Select-Object -ExpandProperty Path -First 1
-          if (-not $runtimeBin) {
-            Write-Error "Swift runtime DLL directory not found"
-            exit 1
-          }
-          Write-Host "Bundling Swift runtime from $runtimeBin"
+          # Ship the exe alone: a Swift executable loads the Swift runtime DLLs
+          # dynamically, and the target installs the Swift runtime + Visual C++
+          # redistributable itself (see the README "Runtime requirements").
           New-Item -ItemType Directory pkg | Out-Null
           Copy-Item ".build\release\boattools.exe" pkg\
-          Copy-Item "$runtimeBin\*.dll" pkg\
           $asset = "boattools-windows-x86_64.zip"
           Compress-Archive -Path pkg\* -DestinationPath $asset -Force
           ((Get-FileHash $asset -Algorithm SHA256).Hash.ToLower() + "  " + $asset) |

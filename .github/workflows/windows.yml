@@ -57,28 +57,13 @@ jobs:
           }
           Write-Host "OK: no curl/zlib DLL imports"
       # Downloadable from the run page, for manual testing on a real machine.
-      # The Swift runtime DLLs ride along: a Swift executable loads them
-      # dynamically and test machines have no Swift toolchain installed.
-      - name: Stage exe with Swift runtime DLLs
-        shell: pwsh
-        run: |
-          # gha-setup-swift installs per-user (%LocalAppData%\Programs\Swift);
-          # the machine-wide Program Files location is kept as a fallback.
-          $runtimeBin = @(
-            "$env:LOCALAPPDATA\Programs\Swift\Runtimes\*\usr\bin",
-            "$env:ProgramFiles\Swift\Runtimes\*\usr\bin"
-          ) | ForEach-Object { Resolve-Path $_ -ErrorAction SilentlyContinue } |
-            Select-Object -ExpandProperty Path -First 1
-          if (-not $runtimeBin) {
-            Write-Error "Swift runtime DLL directory not found"
-            exit 1
-          }
-          Write-Host "Bundling Swift runtime from $runtimeBin"
-          New-Item -ItemType Directory pkg | Out-Null
-          Copy-Item ".build\release\boattools.exe" pkg\
-          Copy-Item "$runtimeBin\*.dll" pkg\
+      # The Swift runtime DLLs are NOT bundled: like the Linux build, the binary
+      # links the Swift runtime dynamically and the target machine installs it
+      # (plus the Visual C++ redistributable) — see the README "Runtime
+      # requirements" section. libcurl stays statically linked, so it is never a
+      # separate dependency.
       - name: Upload boattools artifact
         uses: actions/upload-artifact@v4
         with:
           name: boattools-windows-x64
-          path: pkg\*
+          path: .build\release\boattools.exe
