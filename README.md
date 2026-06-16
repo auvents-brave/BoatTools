@@ -17,46 +17,44 @@ The macOS package is signed and **notarised by Apple**, so it installs without
 any Gatekeeper warning, dropping `boattools` into `/usr/local/bin`. It is fully
 self-contained — no extra runtime to install.
 
-### Runtime requirements
+## Requirements
 
-The pre-built **Linux** and **Windows** binaries link the Swift runtime
-**dynamically** (they are not self-contained), so the target machine installs
-the Swift runtime plus one platform library. macOS has no such requirement.
+### 1. Swift Runtime
 
-**Linux (Ubuntu / Debian)** — two dependencies:
+#### Linux (Ubuntu / Debian)
 
-1. **The Swift runtime.** Install a Swift toolchain (which carries the runtime)
-   with [`swiftly`](https://www.swift.org/install/linux/), the official
-   installer:
+Install a Swift toolchain with `swiftly`, the official installer:
 
-   ```
-   curl -O https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz
-   tar zxf swiftly-$(uname -m).tar.gz && ./swiftly init
-   ```
+```bash
+curl -O https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz
+tar zxf swiftly-$(uname -m).tar.gz && ./swiftly init
+```
 
-2. **The Avahi compatibility library**, which `discover` uses for Bonjour/mDNS
-   browsing:
+#### Windows
 
-   ```
-   sudo apt-get install -y libavahi-compat-libdnssd1
-   ```
+```powershell
+winget install --id Swift.Toolchain -e
+```
 
-**Windows** — two dependencies, both installable with `winget`:
+### 2. Additional Requirements
 
-1. **The Swift runtime:**
+#### Linux (Ubuntu / Debian)
 
-   ```
-   winget install --id Swift.Toolchain -e
-   ```
+The `discover` feature relies on the **Avahi compatibility library** for Bonjour/mDNS. It is not required if you do not plan to use the `discover` feature.
 
-2. **The Visual C++ ("VS") runtime** the Swift runtime depends on:
+```bash
+sudo apt-get install -y libavahi-compat-libdnssd1
+```
 
-   ```
-   winget install --id Microsoft.VCRedist.2015+.x64 -e
-   ```
+#### Windows
 
-libcurl stays **statically linked** into `boattools.exe`, so it is never a
-separate Windows dependency.
+The Windows application relies on the `Microsoft.VCRedist` package. It is generally already installed on most PCs. Running the command below is harmless if it is already present.
+
+```powershell
+winget install --id Microsoft.VCRedist.2015+.x64 -e
+```
+
+The pre-built **Linux** and **Windows** binaries link the Swift runtime (they are not self-contained), so the target machine installs the Swift runtime, macOS has no such requirement.
 
 ### Build from source
 
