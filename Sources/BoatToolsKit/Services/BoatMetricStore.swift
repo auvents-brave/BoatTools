@@ -692,6 +692,12 @@ public final class BoatMetricStore {
 	public func clear() {
 		collector.reset()
 		metrics.removeAll()
+		// The labels side channel (device names, and the active route / waypoint
+		// names from PGN 129285) belongs to the previous source: drop it too, or a
+		// stale route name lingers over the next feed's navigation data.
+		labels.removeAll()
+		activeWaypointNumber = nil
+		routeWaypointNames.removeAll()
 		headingDerivedFromCOG = false
 		clearAIS()
 	}

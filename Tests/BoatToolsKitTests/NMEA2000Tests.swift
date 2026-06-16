@@ -50,6 +50,38 @@ struct NMEA2000Tests {
 		#expect(unavailable.destination == nil)
 	}
 
+	/// Switching source must not leave the previous feed's route lingering: the
+	/// route and waypoint names (PGN 129285) and the active destination (129284)
+	/// travel through the labels side channel, which ``BoatMetricStore/clear()``
+	/// has to drop along with the metrics.
+	@MainActor @Test func `clear() drops the previous source's route and waypoint labels`() {
+		func varString(_ s: String) -> [UInt8] { [UInt8(s.utf8.count + 2), 1] + Array(s.utf8) }
+		// PGN 129285 — route "Monaco - La Maddalena" carrying waypoint 2 "WP 2".
+		var route: [UInt8] = []
+		route += Self.leBytes(UInt16(0))  // start RPS
+		route += Self.leBytes(UInt16(1))  // 1 waypoint in this message
+		route += Self.leBytes(UInt16(1))  // database id
+		route += Self.leBytes(UInt16(1))  // route id
+		route.append(0)  // direction + flags
+		route += varString("Monaco - La Maddalena")
+		route.append(0xFF)  // reserved
+		route += Self.leBytes(UInt16(2)) + varString("WP 2") + [UInt8](repeating: 0, count: 8)
+		// PGN 129284 — destination waypoint number 2.
+		var nav = [UInt8](repeating: 0xFF, count: 35)
+		for (k, b) in Self.leBytes(UInt32(1)).enumerated() { nav[17 + k] = b }
+		for (k, b) in Self.leBytes(UInt32(2)).enumerated() { nav[21 + k] = b }
+
+		let store = BoatMetricStore()
+		store.feed(.nmea2000(pgn: 129_285, source: 0, priority: 6, data: route))
+		store.feed(.nmea2000(pgn: 129_284, source: 0, priority: 6, data: nav))
+		#expect(store.labels["route"] == "Monaco - La Maddalena")
+		#expect(store.labels["waypoint"] == "WP 2")
+
+		store.clear()
+		#expect(store.labels["route"] == nil)
+		#expect(store.labels["waypoint"] == nil)
+	}
+
 	/// PGN 128267 — Water Depth (8 bytes).
 	/// SID + uint32 depth (0.01 m) + int16 offset (0.001 m) + uint8 range (10 m).
 	@Test func `PGN 128267 — water depth, offset and range`() throws {
