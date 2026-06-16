@@ -60,6 +60,27 @@ public struct AISTarget: Sendable, Equatable {
 	/// broadcast (14) safety message, when present.
 	public let text: String?
 
+	/// Overall length in metres (type-5 bow + stern dimensions), when present.
+	public let length: Double?
+	/// Beam in metres (type-5 port + starboard dimensions), when present.
+	public let beam: Double?
+	/// Estimated time of arrival from a type-5 voyage report, when present.
+	public let eta: ETA?
+
+	/// A type-5 ETA: month / day / hour / minute, with no year (AIS omits it).
+	public struct ETA: Sendable, Equatable {
+		public let month: Int
+		public let day: Int
+		public let hour: Int
+		public let minute: Int
+		public init(month: Int, day: Int, hour: Int, minute: Int) {
+			self.month = month
+			self.day = day
+			self.hour = hour
+			self.minute = minute
+		}
+	}
+
 	/// `true` when the report describes own vessel — a VDO sentence, or a VDM
 	/// echoing own MMSI. Set by the transport after decoding; defaults to `false`.
 	public var isOwnShip: Bool = false
@@ -83,7 +104,9 @@ public struct AISTarget: Sendable, Equatable {
 		destination: String? = nil, draught: Double? = nil,
 		navAidType: NavigationalAidType? = nil,
 		altitude: Double? = nil,
-		text: String? = nil
+		text: String? = nil,
+		length: Double? = nil, beam: Double? = nil,
+		eta: ETA? = nil
 	) {
 		self.mmsi = mmsi
 		self.messageType = messageType
@@ -107,6 +130,9 @@ public struct AISTarget: Sendable, Equatable {
 		self.navAidType = navAidType
 		self.altitude = altitude
 		self.text = text
+		self.length = length
+		self.beam = beam
+		self.eta = eta
 	}
 }
 
@@ -518,6 +544,18 @@ internal enum AISDecoder {
 		let draught = Double(buf.uint(294, 8)) / 10.0
 		let dest = buf.text(302, 120)
 
+		// Dimensions (metres): bow + stern = length, port + starboard = beam.
+		let length = buf.uint(240, 9) + buf.uint(249, 9)
+		let beam = buf.uint(258, 6) + buf.uint(264, 6)
+
+		// ETA: month 1–12 (0 = not available).
+		let month = buf.uint(274, 4)
+		let eta =
+			(1...12).contains(month)
+			? AISTarget.ETA(
+				month: month, day: buf.uint(278, 5), hour: buf.uint(283, 5), minute: buf.uint(288, 6))
+			: nil
+
 		return AISTarget(
 			mmsi: mmsi, messageType: .staticAndVoyageData, channel: channel,
 			positionAccuracy: false, raim: false,
@@ -526,7 +564,10 @@ internal enum AISDecoder {
 			shipType: ShipType(rawValue: shipTypeRaw),
 			imoNumber: imo > 0 ? imo : nil,
 			destination: dest.isEmpty ? nil : dest,
-			draught: draught > 0 ? draught : nil
+			draught: draught > 0 ? draught : nil,
+			length: length > 0 ? Double(length) : nil,
+			beam: beam > 0 ? Double(beam) : nil,
+			eta: eta
 		)
 	}
 

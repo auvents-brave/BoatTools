@@ -14,8 +14,47 @@ Download pre-built binaries for **macOS, Windows and Linux** from the
 it carries both the latest stable release and a rolling pre-release.
 
 The macOS package is signed and **notarised by Apple**, so it installs without
-any Gatekeeper warning, dropping `boattools` into `/usr/local/bin`. On Linux,
-`discover` needs the Avahi compatibility library (`libavahi-compat-libdnssd-dev`).
+any Gatekeeper warning, dropping `boattools` into `/usr/local/bin`. It is fully
+self-contained — no extra runtime to install.
+
+## Requirements
+
+### 1. Swift Runtime
+
+#### Linux (Ubuntu / Debian)
+
+Install a Swift toolchain with `swiftly`, the official installer:
+
+```bash
+curl -O https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz
+tar zxf swiftly-$(uname -m).tar.gz && ./swiftly init
+```
+
+#### Windows
+
+```powershell
+winget install --id Swift.Toolchain -e
+```
+
+### 2. Additional Requirements
+
+#### Linux (Ubuntu / Debian)
+
+The `discover` feature relies on the **Avahi compatibility library** for Bonjour/mDNS. It is not required if you do not plan to use the `discover` feature.
+
+```bash
+sudo apt-get install -y libavahi-compat-libdnssd1
+```
+
+#### Windows
+
+The Windows application relies on the `Microsoft.VCRedist` package. It is generally already installed on most PCs. Running the command below is harmless if it is already present.
+
+```powershell
+winget install --id Microsoft.VCRedist.2015+.x64 -e
+```
+
+The pre-built **Linux** and **Windows** binaries link the Swift runtime (they are not self-contained), so the target machine installs the Swift runtime, macOS has no such requirement.
 
 ### Build from source
 
@@ -47,8 +86,9 @@ platform-neutral protocols (`TCPTransport`, `UDPTransport`, `HTTPTransport`,
 ### Building on Windows
 
 The Windows build links libcurl **statically** through the `CCurl`
-system-library target, so the resulting `boattools.exe` is self-contained —
-no DLLs to ship or install. Install libcurl with [vcpkg](https://vcpkg.io)
+system-library target, so `boattools.exe` ships no libcurl/zlib DLLs (the Swift
+runtime DLLs remain a separate dependency — see [Runtime
+requirements](#runtime-requirements)). Install libcurl with [vcpkg](https://vcpkg.io)
 using the static triplet (`-md` = dynamic C runtime, matching the Swift
 runtime); the **`websockets` feature is required** (WebSocket support is
 enabled by default in curl ≥ 8.11 but vcpkg still gates it behind a feature

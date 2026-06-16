@@ -95,7 +95,9 @@ extension AISBitWriter {
 	/// already padded to the required widths.
 	static func type5(
 		mmsi: UInt32, imo: UInt32, callsign: String, name: String,
-		shipType: UInt32, draughtTenthsM: UInt32, destination: String
+		shipType: UInt32, draughtTenthsM: UInt32, destination: String,
+		toBow: UInt32 = 0, toStern: UInt32 = 0, toPort: UInt32 = 0, toStarboard: UInt32 = 0,
+		etaMonth: UInt32 = 0, etaDay: UInt32 = 0, etaHour: UInt32 = 0, etaMinute: UInt32 = 0
 	) -> Self {
 		var w = AISBitWriter()
 		w.appendUInt(5, bits: 6)  // 0:   message type
@@ -106,9 +108,15 @@ extension AISBitWriter {
 		w.appendText(callsign, totalBits: 42)  // 70:  callsign (7 chars)
 		w.appendText(name, totalBits: 120)  // 112: vessel name (20 chars)
 		w.appendUInt(shipType, bits: 8)  // 232: ship/cargo type
-		w.appendUInt(0, bits: 30)  // 240: dimension fields
+		w.appendUInt(toBow, bits: 9)  // 240: dimension to bow
+		w.appendUInt(toStern, bits: 9)  // 249: dimension to stern
+		w.appendUInt(toPort, bits: 6)  // 258: dimension to port
+		w.appendUInt(toStarboard, bits: 6)  // 264: dimension to starboard
 		w.appendUInt(0, bits: 4)  // 270: EPFD type
-		w.appendUInt(0, bits: 20)  // 274: ETA (month, day, hour, minute)
+		w.appendUInt(etaMonth, bits: 4)  // 274: ETA month
+		w.appendUInt(etaDay, bits: 5)  // 278: ETA day
+		w.appendUInt(etaHour, bits: 5)  // 283: ETA hour
+		w.appendUInt(etaMinute, bits: 6)  // 288: ETA minute
 		w.appendUInt(draughtTenthsM, bits: 8)  // 294: max draught (0.1 m)
 		w.appendText(destination, totalBits: 120)  // 302: destination (20 chars)
 		w.appendUInt(0, bits: 1)  // 422: DTE
@@ -317,6 +325,21 @@ struct AISTests {
 		#expect(target.destination == "BREST")
 		if let d = target.draught { #expect(abs(d - 5.8) < 1e-3) }
 		#expect(target.country?.code == "US")
+	}
+
+	@Test func `Type 5 — dimensions and ETA`() throws {
+		let writer = AISBitWriter.type5(
+			mmsi: 227_006_760, imo: 0, callsign: "FAB1234", name: "VENT D'EST",
+			shipType: 36, draughtTenthsM: 0, destination: "",
+			toBow: 20, toStern: 10, toPort: 4, toStarboard: 4,
+			etaMonth: 12, etaDay: 25, etaHour: 14, etaMinute: 30)
+		let (payload, fillBits) = writer.payload()
+		let target = try #require(
+			AISDecoder.decode(payload: payload, fillBits: fillBits, channel: "A"))
+
+		#expect(target.length == 30)  // bow 20 + stern 10
+		#expect(target.beam == 8)  // port 4 + starboard 4
+		#expect(target.eta == AISTarget.ETA(month: 12, day: 25, hour: 14, minute: 30))
 	}
 
 	// MARK: Type 18 — Class B position report
