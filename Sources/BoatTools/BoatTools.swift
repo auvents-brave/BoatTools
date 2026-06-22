@@ -576,6 +576,7 @@ struct BoatToolsCLI: AsyncParsableCommand {
 			FileCommand.self,
 			VRMCommand.self,
 			DiscoverCommand.self,
+			GMDSSCommand.self,
 		])
 }
 
@@ -1043,6 +1044,48 @@ struct VRMCommand: AsyncParsableCommand {
 		}
 
 		try await client.shutdown()
+	}
+}
+
+// =============================================================================
+// MARK: - gmdss (WMO high-seas forecasts)
+// =============================================================================
+
+struct GMDSSCommand: AsyncParsableCommand {
+	static let configuration = CommandConfiguration(
+		commandName: "gmdss",
+		abstract: "Download official GMDSS high-seas forecasts (WMO WWMIWS)")
+
+	@Option(name: .shortAndLong, help: ArgumentHelp("METAREA number (1–21) — prints all its bulletins", valueName: "n"))
+	var metarea: Int?
+
+	@Option(help: ArgumentHelp("Latitude, decimal degrees (N+); with --lon prints only the sub-area", valueName: "deg"))
+	var lat: Double?
+
+	@Option(help: ArgumentHelp("Longitude, decimal degrees (E+)", valueName: "deg"))
+	var lon: Double?
+
+	func validate() throws {
+		switch (metarea, lat, lon) {
+		case (.some, nil, nil), (nil, .some, .some): break
+		default:
+			throw ValidationError("Use either --metarea <1-21>, or --lat <deg> --lon <deg>.")
+		}
+	}
+
+	func run() async throws {
+		let service = GMDSSForecastService()
+		let forecast =
+			if let metarea {
+				try await service.forecast(metarea: metarea)
+			} else {
+				try await service.forecast(latitude: lat!, longitude: lon!)
+			}
+		print("— \(forecast.title) · issued \(forecast.issued) —")
+		for bulletin in forecast.bulletins {
+			print("\n=== \(bulletin.label) ===")
+			print(bulletin.text)
+		}
 	}
 }
 

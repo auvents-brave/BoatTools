@@ -5,7 +5,7 @@ Swift CLI tools to explore sailboat data sources, in **strict concurrency mode**
 The package ships two products:
 
 - **`BoatToolsKit`** — library, multiplatform. All the business logic: NMEA / Signal K / Victron VRM clients, parsers, Bonjour discovery, Apple device sensors.
-- **`boattools`** — executable, ArgumentParser-based CLI on top of the library. Four subcommands: `connect`, `file`, `vrm`, `discover`. The Apple device sensors are a `BoatToolsKit` feature only — they are not exposed by the CLI.
+- **`boattools`** — executable, ArgumentParser-based CLI on top of the library. Five subcommands: `connect`, `file`, `vrm`, `discover`, `gmdss`. The Apple device sensors are a `BoatToolsKit` feature only — they are not exposed by the CLI.
 
 ## Install
 
@@ -147,6 +147,7 @@ frames to the clients and the metric store and let them dispatch.
 **Clients** — talk to live data sources.
 - `SignalKClient` — REST snapshots (`snapshot(...)`), WebSocket live stream (`liveStream(...)`), and raw NDJSON delta streams over TCP / UDP (`tcpStream(...)`, `udpStream(...)`), with token- or password-based auth (`login(...)`).
 - `VictronVRMClient` — VRM Portal HTTP API: `installations()`, `diagnostics(siteId:)`, and `metrics(siteId:)` mapped onto canonical metric names nested under per-device prefixes (`battery.0.`, `solar.1.`, `tank.`, `vebus.`, `system.`). `labels(...)` fetches the installation's custom device names; `frameStream(...)` polls continuously, or takes a single snapshot when the interval is zero. `DiagnosticRecord` exposes `device`, `instance` and a `unit` stripped of its printf format.
+- `GMDSSForecastService` — official GMDSS high-seas text forecasts from the WMO WWMIWS service: `forecast(metarea:)` for a whole METAREA (1–21), or `forecast(latitude:longitude:)` which resolves the position to its METAREA and keeps the matching directional sub-bulletin. The transport is injectable (`URLSession` by default); `GMDSSForecast` / `GMDSSBulletin` carry the title, issue time, sub-area label and body text.
 - Each client also offers `static` stream factories (`SignalKClient.liveStream(config:)` / `.tcpStream(...)` / `.udpStream(...)`, `VictronVRMClient.frameStream(accessToken:siteId:...)`) that manage the underlying transport internally, so callers can pipe them straight into the store without touching the networking stack.
 
 **Transport** — NMEA over TCP / UDP / file.
@@ -194,6 +195,7 @@ boattools connect    — all transports: TCP, UDP broadcast/multicast, Signal K 
 boattools file       — read and parse a local log file
 boattools vrm        — Victron VRM cloud
 boattools discover   — LAN discovery via Bonjour/mDNS
+boattools gmdss      — official GMDSS high-seas forecasts (WMO WWMIWS)
 boattools --version  — print the version string
 ```
 
@@ -228,6 +230,10 @@ boattools --version  — print the version string
 - [LAN discovery via Bonjour — interactive menu, then connect](#lan-discovery-via-bonjour--interactive-menu-then-connect)
 - [LAN discovery — list only, no prompt (scripting / piping)](#lan-discovery--list-only-no-prompt-scripting--piping)
 - [LAN discovery — longer scan window](#lan-discovery--longer-scan-window)
+
+**`gmdss`**
+- [GMDSS forecast — a whole METAREA](#gmdss-forecast--a-whole-metarea)
+- [GMDSS forecast — only the sub-area for a position](#gmdss-forecast--only-the-sub-area-for-a-position)
 
 ### NMEA over TCP — connect to a gateway / MFD
 
@@ -423,3 +429,25 @@ least the TCP connection works.
 ```sh
 ./boattools discover --timeout 10
 ```
+
+### GMDSS forecast — a whole METAREA
+
+Prints every bulletin issued for the METAREA (1–21). METAREA 3 (the
+Mediterranean & Black Sea) carries two: a `WEST` bulletin from Météo-France and
+an `EAST` one from the Hellenic service.
+
+```sh
+./boattools gmdss --metarea 3
+```
+
+### GMDSS forecast — only the sub-area for a position
+
+Resolves the position to its METAREA and prints only the matching sub-area
+bulletin. Off Sicily, that is the western-Mediterranean (Météo-France) text.
+
+```sh
+./boattools gmdss --lat 37.1 --lon 14.1
+```
+
+The data is the official GMDSS high-seas text, fetched from the WMO Worldwide
+Met-ocean Information and Warning Service (WWMIWS).
