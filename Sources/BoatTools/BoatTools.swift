@@ -577,6 +577,7 @@ struct BoatToolsCLI: AsyncParsableCommand {
 			VRMCommand.self,
 			DiscoverCommand.self,
 			GMDSSCommand.self,
+			SimulateCommand.self,
 		])
 }
 
@@ -1086,6 +1087,48 @@ struct GMDSSCommand: AsyncParsableCommand {
 			print("\n=== \(bulletin.label) ===")
 			print(bulletin.text)
 		}
+	}
+}
+
+// =============================================================================
+// MARK: - simulate (synthetic NMEA 2000 passage)
+// =============================================================================
+
+struct SimulateCommand: AsyncParsableCommand {
+	static let configuration = CommandConfiguration(
+		commandName: "simulate",
+		abstract: "Replay a synthetic NMEA 2000 passage from the built-in simulator")
+
+	@Option(name: .shortAndLong, help: ArgumentHelp("Route id (use --list to see them)", valueName: "id"))
+	var route: String = SimulatorRoute.monacoToMaddalena.id
+
+	@Option(name: .shortAndLong, help: ArgumentHelp("Speed over ground, knots", valueName: "kn"))
+	var speed: Double = 6
+
+	@Option(help: ArgumentHelp("Fast-forward factor for movement only (SOG stays realistic)", valueName: "x"))
+	var fast: Double = 1
+
+	@Option(name: .shortAndLong, help: ArgumentHelp("Stop after N seconds (0 = until Ctrl-C)", valueName: "sec"))
+	var duration: Int = 0
+
+	@Flag(help: "List the available routes and exit")
+	var list: Bool = false
+
+	func run() async throws {
+		if list {
+			print("— Simulator routes —")
+			for r in SimulatorRoute.presets {
+				print("  [\(r.id)] \(r.name) — \(r.waypoints.count) waypoints")
+			}
+			return
+		}
+		guard let passage = SimulatorRoute.preset(id: route) else {
+			throw ValidationError("Unknown route '\(route)'. Use --list to see the available ids.")
+		}
+		print("— Simulating \(passage.name) at \(speed) kn (×\(fast)) — Ctrl-C to stop —")
+		let stream = NMEASimulator.frameStream(
+			route: passage, speedKnots: speed, timeMultiplier: fast, loop: true)
+		try await consumeFrames(stream, duration: duration)
 	}
 }
 
