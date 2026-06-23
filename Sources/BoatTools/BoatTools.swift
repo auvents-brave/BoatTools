@@ -576,6 +576,8 @@ struct BoatToolsCLI: AsyncParsableCommand {
 			FileCommand.self,
 			VRMCommand.self,
 			DiscoverCommand.self,
+			GMDSSCommand.self,
+			SimulateCommand.self,
 		])
 }
 
@@ -1043,6 +1045,90 @@ struct VRMCommand: AsyncParsableCommand {
 		}
 
 		try await client.shutdown()
+	}
+}
+
+// =============================================================================
+// MARK: - gmdss (WMO high-seas forecasts)
+// =============================================================================
+
+struct GMDSSCommand: AsyncParsableCommand {
+	static let configuration = CommandConfiguration(
+		commandName: "gmdss",
+		abstract: "Download official GMDSS high-seas forecasts (WMO WWMIWS)")
+
+	@Option(name: .shortAndLong, help: ArgumentHelp("METAREA number (1–21) — prints all its bulletins", valueName: "n"))
+	var metarea: Int?
+
+	@Option(help: ArgumentHelp("Latitude, decimal degrees (N+); with --lon prints only the sub-area", valueName: "deg"))
+	var lat: Double?
+
+	@Option(help: ArgumentHelp("Longitude, decimal degrees (E+)", valueName: "deg"))
+	var lon: Double?
+
+	func validate() throws {
+		switch (metarea, lat, lon) {
+		case (.some, nil, nil), (nil, .some, .some): break
+		default:
+			throw ValidationError("Use either --metarea <1-21>, or --lat <deg> --lon <deg>.")
+		}
+	}
+
+	func run() async throws {
+		let service = GMDSSForecastService()
+		let forecast =
+			if let metarea {
+				try await service.forecast(metarea: metarea)
+			} else {
+				try await service.forecast(latitude: lat!, longitude: lon!)
+			}
+		print("— \(forecast.title) · issued \(forecast.issued) —")
+		for bulletin in forecast.bulletins {
+			print("\n=== \(bulletin.label) ===")
+			print(bulletin.text)
+		}
+	}
+}
+
+// =============================================================================
+// MARK: - simulate (synthetic NMEA 2000 passage)
+// =============================================================================
+
+struct SimulateCommand: AsyncParsableCommand {
+	static let configuration = CommandConfiguration(
+		commandName: "simulate",
+		abstract: "Replay a synthetic NMEA 2000 passage from the built-in simulator")
+
+	@Option(name: .shortAndLong, help: ArgumentHelp("Route id (use --list to see them)", valueName: "id"))
+	var route: String = SimulatorRoute.monacoToMaddalena.id
+
+	@Option(name: .shortAndLong, help: ArgumentHelp("Speed over ground, knots", valueName: "kn"))
+	var speed: Double = 6
+
+	@Option(help: ArgumentHelp("Fast-forward factor for movement only (SOG stays realistic)", valueName: "x"))
+	var fast: Double = 1
+
+	@Option(name: .shortAndLong, help: ArgumentHelp("Stop after N seconds (0 = until Ctrl-C)", valueName: "sec"))
+	var duration: Int = 0
+
+	@Flag(help: "List the available routes and exit")
+	var list: Bool = false
+
+	func run() async throws {
+		if list {
+			print("— Simulator routes —")
+			for r in SimulatorRoute.presets {
+				print("  [\(r.id)] \(r.name) — \(r.waypoints.count) waypoints")
+			}
+			return
+		}
+		guard let passage = SimulatorRoute.preset(id: route) else {
+			throw ValidationError("Unknown route '\(route)'. Use --list to see the available ids.")
+		}
+		print("— Simulating \(passage.name) at \(speed) kn (×\(fast)) — Ctrl-C to stop —")
+		let stream = NMEASimulator.frameStream(
+			route: passage, speedKnots: speed, timeMultiplier: fast, loop: true)
+		try await consumeFrames(stream, duration: duration)
 	}
 }
 
