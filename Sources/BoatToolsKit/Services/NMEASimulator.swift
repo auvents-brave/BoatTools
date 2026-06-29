@@ -197,8 +197,11 @@ public enum NMEASimulator {
 
 	/// One past sample for seeding a curve: a value at a point in time.
 	public struct HistorySample: Sendable {
+		/// The instant the sample was taken.
 		public let at: Date
+		/// The sampled value.
 		public let value: Double
+		/// Creates a history sample from a value and its timestamp.
 		public init(at: Date, value: Double) {
 			self.at = at
 			self.value = value
