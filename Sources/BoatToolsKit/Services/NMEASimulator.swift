@@ -909,6 +909,11 @@ public enum NMEASimulator {
 		let start: GeoPoint
 		let course: Double
 		let speed: Double
+		/// Type-5 voyage data — class A commercial traffic broadcasts it.
+		var callsign: String?
+		var destination: String?
+		var eta: AISTarget.ETA?
+		var draught: Double?
 	}
 
 	/// A spread of traffic along the Gibraltar→Genoa corridor and around Corsica.
@@ -918,29 +923,40 @@ public enum NMEASimulator {
 		// Western corridor (Gibraltar → Ligurian Sea).
 		AISShip(
 			mmsi: 224_990_011, name: "CABO FINISTERRE", type: .cargo, classB: false,
-			start: GeoPoint(latitude: 36.10, longitude: -5.20), course: 62, speed: 14.5),
+			start: GeoPoint(latitude: 36.10, longitude: -5.20), course: 62, speed: 14.5,
+			callsign: "EA9901", destination: "GENOVA",
+			eta: AISTarget.ETA(month: 7, day: 9, hour: 6, minute: 0), draught: 9.8),
 		AISShip(
 			mmsi: 256_990_021, name: "MELITA STAR", type: .cargo, classB: false,
-			start: GeoPoint(latitude: 37.40, longitude: -1.80), course: 58, speed: 13.0),
+			start: GeoPoint(latitude: 37.40, longitude: -1.80), course: 58, speed: 13.0,
+			callsign: "9H9901", destination: "MARSEILLE", draught: 8.4),
 		AISShip(
 			mmsi: 247_990_031, name: "GOLFO DI NAPOLI", type: .passenger, classB: false,
-			start: GeoPoint(latitude: 38.90, longitude: 2.40), course: 55, speed: 18.0),
+			start: GeoPoint(latitude: 38.90, longitude: 2.40), course: 55, speed: 18.0,
+			callsign: "IB9901", destination: "NAPOLI", draught: 6.8),
 		AISShip(
 			mmsi: 228_990_041, name: "MARSEILLE EXPRESS", type: .cargo, classB: false,
-			start: GeoPoint(latitude: 41.20, longitude: 5.10), course: 70, speed: 16.0),
+			start: GeoPoint(latitude: 41.20, longitude: 5.10), course: 70, speed: 16.0,
+			callsign: "FN9901", destination: "GENOVA",
+			eta: AISTarget.ETA(month: 7, day: 7, hour: 14, minute: 30), draught: 10.2),
 		AISShip(
 			mmsi: 636_990_051, name: "ATLANTIC PIONEER", type: .cargo, classB: false,
-			start: GeoPoint(latitude: 42.60, longitude: 7.20), course: 75, speed: 15.5),
+			start: GeoPoint(latitude: 42.60, longitude: 7.20), course: 75, speed: 15.5,
+			callsign: "A89901", destination: "LIVORNO", draught: 11.6),
 		AISShip(
 			mmsi: 538_990_061, name: "PACIFIC ENVOY", type: .cargo, classB: false,
-			start: GeoPoint(latitude: 43.50, longitude: 8.40), course: 248, speed: 14.0),
+			start: GeoPoint(latitude: 43.50, longitude: 8.40), course: 248, speed: 14.0,
+			callsign: "V79901", destination: "VALENCIA", draught: 9.1),
 		// Around Corsica and the Ligurian / Tyrrhenian, near the passage.
 		AISShip(
 			mmsi: 247_990_071, name: "CORSICA VICTORIA", type: .passenger, classB: false,
-			start: GeoPoint(latitude: 42.70, longitude: 9.45), course: 200, speed: 21.0),
+			start: GeoPoint(latitude: 42.70, longitude: 9.45), course: 200, speed: 21.0,
+			callsign: "IB9902", destination: "BASTIA",
+			eta: AISTarget.ETA(month: 7, day: 6, hour: 11, minute: 45), draught: 6.4),
 		AISShip(
 			mmsi: 228_990_081, name: "MEDITERRANEE", type: .passenger, classB: false,
-			start: GeoPoint(latitude: 41.90, longitude: 8.74), course: 20, speed: 19.0),
+			start: GeoPoint(latitude: 41.90, longitude: 8.74), course: 20, speed: 19.0,
+			callsign: "FN9902", destination: "AJACCIO", draught: 6.9),
 		AISShip(
 			mmsi: 247_990_091, name: "ALERIA", type: .cargo, classB: false,
 			start: GeoPoint(latitude: 42.10, longitude: 9.65), course: 350, speed: 11.0),
@@ -964,7 +980,16 @@ public enum NMEASimulator {
 			start: GeoPoint(latitude: 40.50, longitude: 9.20), course: 5, speed: 14.0),
 		AISShip(
 			mmsi: 227_990_161, name: "NICE LA BELLE", type: .passenger, classB: false,
-			start: GeoPoint(latitude: 43.50, longitude: 7.40), course: 130, speed: 17.5),
+			start: GeoPoint(latitude: 43.50, longitude: 7.40), course: 130, speed: 17.5,
+			callsign: "FN9903", destination: "CALVI",
+			eta: AISTarget.ETA(month: 7, day: 6, hour: 18, minute: 15), draught: 5.8),
+		// Coastal ferry leaving Monaco as the passage starts — close AIS traffic
+		// right at the departure, so a target is on-screen from the first minute.
+		AISShip(
+			mmsi: 227_990_191, name: "AZUR EXPRESS", type: .passenger, classB: false,
+			start: GeoPoint(latitude: 43.72, longitude: 7.44), course: 245, speed: 15.0,
+			callsign: "FN9904", destination: "NICE",
+			eta: AISTarget.ETA(month: 7, day: 6, hour: 9, minute: 30), draught: 4.6),
 		AISShip(
 			mmsi: 247_990_171, name: "LIBECCIO", type: .tug, classB: true,
 			start: GeoPoint(latitude: 43.00, longitude: 9.50), course: 210, speed: 8.0),
@@ -994,7 +1019,9 @@ public enum NMEASimulator {
 						speedOverGround: ship.speed, courseOverGround: ship.course,
 						trueHeading: Int(ship.course.rounded()),
 						navigationStatus: ship.classB ? nil : .underWayUsingEngine,
-						shipName: ship.name, shipType: ship.type)))
+						shipName: ship.name, callsign: ship.callsign, shipType: ship.type,
+						destination: ship.destination, draught: ship.draught,
+						eta: ship.eta)))
 		}
 		emitAISEvents(tick: tick, into: continuation)
 	}
