@@ -1,0 +1,255 @@
+// Streaming connections for the C ABI: open a TCP / UDP / simulator NMEA
+// source, poll the decoded metrics from C#, close. The C# side polls rather
+// than registering callbacks — the FFI stays one-directional, so no managed
+// delegate ever has to survive a native thread.
+
+internal import BoatToolsKit
+internal import Foundation
+internal import Synchronization
+
+// MARK: - Poll payloads
+
+/// One decoded metric, as serialised to the C# side.
+struct MetricPayload: Encodable {
+	let name: String
+	let value: Double
+	let unit: String?
+	/// Seconds since the Unix epoch.
+	let t: Double
+}
+
+/// One AIS target, as serialised to the C# side. `kind` mirrors the Swift
+/// app's classification: `vessel`, `aid`, `base`, `sar` or `distress`.
+struct AisPayload: Encodable {
+	let mmsi: Int
+	let lat: Double
+	let lon: Double
+	let heading: Double?
+	let sog: Double?
+	let name: String?
+	let kind: String
+	let stale: Bool
+}
+
+/// What one `boattools_bridge_poll` call returns.
+struct PollPayload: Encodable {
+	/// `running`, `ended` (stream finished), `failed` (see `error`) or
+	/// `unknown` (bad handle).
+	let status: String
+	let error: String?
+	let metrics: [MetricPayload]
+	/// The AIS picture as of this poll — the latest state per target, not a
+	/// delta; targets quiet for over ten minutes are flagged stale.
+	let ais: [AisPayload]
+}
+
+// MARK: - Connection
+
+/// One live connection: the consuming task appends, `drain()` empties the
+/// buffer into a poll payload.
+final class BridgeConnection: Sendable {
+	private struct State {
+		var status = "running"
+		var error: String?
+		var metrics: [MetricPayload] = []
+		var targets: [Int: (target: AISTarget, seen: Date)] = [:]
+	}
+
+	private let state = Mutex(State())
+
+	func append(_ metric: BoatMetric) {
+		state.withLock { s in
+			s.metrics.append(
+				MetricPayload(
+					name: metric.name,
+					value: metric.value,
+					unit: metric.unit,
+					t: metric.timestamp.timeIntervalSince1970
+				))
+			// Cap the buffer so a stalled poller cannot grow it unbounded.
+			if s.metrics.count > 1024 {
+				s.metrics.removeFirst(s.metrics.count - 1024)
+			}
+		}
+	}
+
+	/// Remembers the latest state of an AIS target (keyed by MMSI).
+	func update(_ target: AISTarget) {
+		guard target.latitude != nil, target.longitude != nil else { return }
+		state.withLock { s in
+			s.targets[target.mmsi] = (target, Date())
+			// Bound memory: forget targets gone for over an hour.
+			if s.targets.count > 512 {
+				let horizon = Date().addingTimeInterval(-3600)
+				s.targets = s.targets.filter { $0.value.seen > horizon }
+			}
+		}
+	}
+
+	func finish(error: String?) {
+		state.withLock { s in
+			s.status = error == nil ? "ended" : "failed"
+			s.error = error
+		}
+	}
+
+	func drain() -> PollPayload {
+		state.withLock { s in
+			let now = Date()
+			let ais = s.targets.values.compactMap { entry -> AisPayload? in
+				guard let lat = entry.target.latitude, let lon = entry.target.longitude else {
+					return nil
+				}
+				// Heading falls back to the course, out-of-range values dropped —
+				// the same rule as the Swift app's AIS mapping.
+				var heading = entry.target.trueHeading.map(Double.init) ?? entry.target.courseOverGround
+				if let value = heading, !(0..<360).contains(value) { heading = nil }
+				return AisPayload(
+					mmsi: entry.target.mmsi,
+					lat: lat, lon: lon,
+					heading: heading,
+					sog: entry.target.speedOverGround,
+					name: entry.target.shipName,
+					kind: Self.kind(for: entry.target),
+					stale: now.timeIntervalSince(entry.seen) > 600
+				)
+			}
+			.sorted { $0.mmsi < $1.mmsi }
+			let payload = PollPayload(status: s.status, error: s.error, metrics: s.metrics, ais: ais)
+			s.metrics.removeAll(keepingCapacity: true)
+			return payload
+		}
+	}
+
+	/// The full latest record for one target, with when it was last heard.
+	func target(mmsi: Int) -> (target: AISTarget, seen: Date)? {
+		state.withLock { $0.targets[mmsi] }
+	}
+
+	/// Classifies a target the way the Swift app does: a SART/EPIRB MMSI range
+	/// means distress; otherwise the message type tells aids to navigation,
+	/// base stations and SAR aircraft apart from ordinary vessels.
+	static func kind(for target: AISTarget) -> String {
+		if (970_000_000...974_999_999).contains(target.mmsi) { return "distress" }
+		switch target.messageType {
+		case .aidToNavigationReport: return "aid"
+		case .baseStationReport: return "base"
+		case .standardSARAircraftReport: return "sar"
+		default: return "vessel"
+		}
+	}
+}
+
+// MARK: - Registry
+
+/// The open connections, keyed by the opaque handle handed to C#.
+final class ConnectionRegistry: Sendable {
+	private struct Entry {
+		let connection: BridgeConnection
+		let task: Task<Void, Never>
+	}
+
+	private struct State {
+		var nextHandle: Int64 = 1
+		var entries: [Int64: Entry] = [:]
+	}
+
+	private let state = Mutex(State())
+
+	/// Starts consuming `stream` and returns the handle for poll / close.
+	func open(_ stream: AsyncThrowingStream<NMEAFrame, any Error>) -> Int64 {
+		let connection = BridgeConnection()
+		let task = Task {
+			do {
+				for try await frame in stream {
+					switch frame {
+					case .metric(let metric): connection.append(metric)
+					case .aisTarget(let target): connection.update(target)
+					default: break
+					}
+				}
+				connection.finish(error: nil)
+			} catch {
+				connection.finish(error: "\(error)")
+			}
+		}
+		return state.withLock { s in
+			let handle = s.nextHandle
+			s.nextHandle += 1
+			s.entries[handle] = Entry(connection: connection, task: task)
+			return handle
+		}
+	}
+
+	func connection(_ handle: Int64) -> BridgeConnection? {
+		state.withLock { $0.entries[handle]?.connection }
+	}
+
+	func close(_ handle: Int64) {
+		let entry = state.withLock { $0.entries.removeValue(forKey: handle) }
+		entry?.task.cancel()
+	}
+}
+
+let registry = ConnectionRegistry()
+
+// MARK: - C ABI
+
+/// Opens a TCP client connection to an NMEA 0183 / NMEA 2000 / Signal K
+/// source (wire format auto-detected by BoatToolsKit).
+/// - Returns: A handle (> 0) for `boattools_bridge_poll` / `boattools_bridge_close`,
+///   or 0 when the arguments are invalid.
+@_cdecl("boattools_bridge_open_tcp")
+public func boattools_bridge_open_tcp(_ host: UnsafePointer<CChar>?, _ port: Int32) -> Int64 {
+	guard let host, port > 0 else { return 0 }
+	let config = NMEATransportConfig(mode: .tcp(host: String(cString: host), port: Int(port)))
+	return registry.open(NMEATransport.frameStream(config: config))
+}
+
+/// Opens a UDP receiver bound to `port`, optionally joining a multicast group
+/// (pass NULL or an empty string for plain unicast/broadcast).
+/// - Returns: A handle (> 0), or 0 when the arguments are invalid.
+@_cdecl("boattools_bridge_open_udp")
+public func boattools_bridge_open_udp(_ port: Int32, _ multicastGroup: UnsafePointer<CChar>?) -> Int64 {
+	guard port > 0 else { return 0 }
+	let group = multicastGroup.map { String(cString: $0) }
+	let config = NMEATransportConfig(
+		mode: .udp(listenPort: Int(port), multicastGroup: (group?.isEmpty ?? true) ? nil : group))
+	return registry.open(NMEATransport.frameStream(config: config))
+}
+
+/// Opens BoatToolsKit's synthetic passage (Monaco → La Maddalena) — live data
+/// with no boat attached. `speedKnots` ≤ 0 defaults to 6 kn; `timeMultiplier`
+/// fast-forwards the movement (clamped to ≥ 1).
+/// - Returns: A handle (> 0).
+@_cdecl("boattools_bridge_open_simulator")
+public func boattools_bridge_open_simulator(_ speedKnots: Double, _ timeMultiplier: Double) -> Int64 {
+	registry.open(
+		NMEASimulator.frameStream(
+			route: .monacoToMaddalena,
+			speedKnots: speedKnots > 0 ? speedKnots : 6,
+			timeMultiplier: max(1, timeMultiplier)
+		))
+}
+
+/// Drains the metrics decoded since the previous poll, as JSON:
+/// `{"status","error","metrics":[{name,value,unit,t}]}` — `status` is
+/// `running` / `ended` / `failed` / `unknown` (bad handle).
+/// - Returns: A JSON string to release with `boattools_bridge_string_free`.
+@_cdecl("boattools_bridge_poll")
+public func boattools_bridge_poll(_ handle: Int64) -> UnsafeMutablePointer<CChar>? {
+	guard let connection = registry.connection(handle) else {
+		return cString(#"{"status":"unknown","metrics":[],"ais":[]}"#)
+	}
+	guard let data = try? JSONEncoder().encode(connection.drain()) else {
+		return cString(#"{"status":"failed","error":"encoding failed","metrics":[],"ais":[]}"#)
+	}
+	return cString(String(decoding: data, as: UTF8.self))
+}
+
+/// Closes a connection and releases its handle. Safe on unknown handles.
+@_cdecl("boattools_bridge_close")
+public func boattools_bridge_close(_ handle: Int64) {
+	registry.close(handle)
+	removeDeviceFeed(handle)
+}
