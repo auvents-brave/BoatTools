@@ -117,7 +117,13 @@ public struct GMDSSForecastService: Sendable {
 
 	/// Keeps the directional bulletins covering a position; falls back to all of
 	/// them when the METAREA carries no directional split.
-	static func bulletins(
+	/// - Parameters:
+	///   - bulletins: The METAREA's full bulletin set.
+	///   - lat: Decimal degrees, north positive.
+	///   - lon: Decimal degrees, east positive.
+	///   - area: The METAREA whose split applies.
+	/// - Returns: The bulletins covering the position.
+	public static func bulletins(
 		_ bulletins: [GMDSSBulletin], coveringLatitude lat: Double, longitude lon: Double, in area: Metarea
 	) -> [GMDSSBulletin] {
 		guard bulletins.count > 1 else { return bulletins }
