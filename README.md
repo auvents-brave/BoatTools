@@ -5,7 +5,7 @@ Swift CLI tools to explore sailboat data sources, in **strict concurrency mode**
 The package ships two products:
 
 - **`BoatToolsKit`** — library, multiplatform. All the business logic: NMEA / Signal K / Victron VRM clients, parsers, Bonjour discovery, Apple device sensors.
-- **`boattools`** — executable, ArgumentParser-based CLI on top of the library. Six subcommands: `connect`, `file`, `vrm`, `discover`, `gmdss`, `simulate`. The Apple device sensors are a `BoatToolsKit` feature only — they are not exposed by the CLI.
+- **`boattools`** — executable, ArgumentParser-based CLI on top of the library. Seven subcommands: `connect`, `devices`, `file`, `vrm`, `discover`, `gmdss`, `simulate`. The Apple device sensors are a `BoatToolsKit` feature only — they are not exposed by the CLI.
 
 A third piece lives in the nested [`Bridge/`](Bridge) package:
 **libBoatToolsBridge**, a dynamic library exposing `BoatToolsKit` through a
@@ -164,6 +164,7 @@ frames to the clients and the metric store and let them dispatch.
 **Transport** — NMEA over TCP / UDP / file.
 - `NMEATransport` — opens a TCP or UDP socket, demultiplexes lines, runs the multipart / fast-packet / GSV assemblers, emits `NMEAFrame` values.
 - `NMEATransportMode`, `NMEAInputFormat` — configuration enums.
+- `NMEA2000DeviceDirectory` / `NMEA2000Device` — inventory of the devices on the NMEA 2000 network, accumulated from the device-information PGNs (60928 address claims, 126996 product information, 126998 configuration information, 126464 PGN lists, 126993 heartbeats): manufacturer, model, serial, versions, class / function, instances, load equivalency, PGN lists, last seen. `interrogationLines(destination:)` yields the ISO Requests (YD RAW transmit format) that make every device announce itself.
 - `ConnectionOwnershipManager` — AppGroup-backed primary / secondary election so several processes (e.g. main app + widget) can share one upstream connection.
 
 **Device sensors** — Apple-only fallback.
@@ -203,6 +204,7 @@ Which NMEA 0183 sentences, NMEA 2000 PGNs and Signal K paths `BoatToolsKit` deco
 
 ```
 boattools connect    — all transports: TCP, UDP broadcast/multicast, Signal K web
+boattools devices    — inventory the devices present on the NMEA 2000 network
 boattools file       — read and parse a local log file
 boattools vrm        — Victron VRM cloud
 boattools discover   — LAN discovery via Bonjour/mDNS
@@ -226,6 +228,9 @@ boattools --version  — print the version string
 - [Signal K snapshot polled every 30s forever (Ctrl-C to stop)](#signal-k-snapshot-polled-every-30s-forever-ctrl-c-to-stop)
 - [Signal K via Victron's authenticated relay](#signal-k-via-victrons-authenticated-relay)
 - [Capture a live session to a log file](#capture-a-live-session-to-a-log-file)
+
+**`devices`**
+- [Inventory the NMEA 2000 network](#inventory-the-nmea-2000-network)
 
 **`file`**
 - [Read a local log file — dump as fast as possible](#read-a-local-log-file--dump-as-fast-as-possible)
@@ -347,6 +352,42 @@ Bare YD RAW frames carry no timestamp, so on capture they are written with a
 `<HH:mm:ss.SSS> R` prefix — this lets `file --realtime` replay the capture at the
 original pace. Other formats already embed a timestamp (or carry their own
 framing) and are written verbatim.
+
+---
+
+### Inventory the NMEA 2000 network
+
+```sh
+# TCP RAW gateway — broadcasts an ISO Request first, so every device answers
+./boattools devices --host 10.0.0.50 --port 1457
+
+# UDP broadcast — purely passive (devices are heard as they announce themselves)
+./boattools devices --port 2000 --format ydraw --duration 30
+```
+
+Collects the device-information PGNs — 60928 address claims, 126996 product
+information, 126998 configuration information, 126464 PGN lists, 126993
+heartbeats — and prints one block per device: manufacturer, model, serial,
+software version, class / function, instances, certification, load
+equivalency, transmitted and received PGNs.
+
+```
+━━ @035  GPS 24xd — Garmin ━━
+  kind           Navigation · Ownship Position (GNSS)
+  instances      device 0 · system 0
+  unique number  123456
+  NAME           0xC27891051CA1E240 · self-addressing
+  product code   9876
+  software       2.60
+  serial         SN-0042
+  transmits      126992, 129025, 129026, 129029, 129539, 129540
+  heartbeat      every 60.0 s
+  last seen      14:07:12
+```
+
+On UDP (receive-only) the command stays passive; use `--no-request` to force
+the same on TCP. Signal K web sources do not relay these PGNs — point the
+command at the gateway itself.
 
 ---
 
