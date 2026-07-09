@@ -574,6 +574,8 @@ struct BoatToolsCLI: AsyncParsableCommand {
 		subcommands: [
 			ConnectCommand.self,
 			DevicesCommand.self,
+			PilotCommand.self,
+			WindlassCLICommand.self,
 			FileCommand.self,
 			VRMCommand.self,
 			DiscoverCommand.self,
@@ -1079,6 +1081,181 @@ private func renderDeviceInventory(_ devices: [NMEA2000Device]) {
 		for (label, value) in rows {
 			let pad = String(repeating: " ", count: width - label.count)
 			print("  \(label)\(pad)  \(value)")
+		}
+	}
+}
+
+// =============================================================================
+// MARK: - pilot / windlass (network commands)
+// =============================================================================
+
+/// The endpoint options shared by the command subcommands — TCP only, since
+/// commands must be transmitted onto the bus.
+struct CommandEndpointOptions: ParsableArguments {
+	@Option(name: .shortAndLong, help: "Gateway URL — tcp://host:port")
+	var url: String?
+
+	@Option(name: .shortAndLong, help: "Gateway host — with --port. Incompatible with --url.")
+	var host: String?
+
+	@Option(name: .shortAndLong, help: "Gateway TCP port.")
+	var port: Int?
+
+	@Option(help: "Wire format of the gateway (auto|ydraw|seasmart|ikonvert)")
+	var format: WireFormat = .auto
+
+	@Option(help: ArgumentHelp("Seconds to wait for the target device to answer", valueName: "sec"))
+	var timeout: Int = 10
+
+	/// Opens the transmit-capable session, or explains why it cannot.
+	func openSession() throws -> NMEASession {
+		var probe = ConnectCommand()
+		probe.url = url
+		probe.host = host
+		probe.port = port
+		probe.multicast = nil
+		guard case .tcp(let h, let p) = try probe.resolveTransport() else {
+			throw ValidationError("commands must be transmitted — use a TCP gateway (--host/--port or --url tcp://…)")
+		}
+		return NMEATransport.session(
+			config: NMEATransportConfig(
+				mode: .tcp(host: h, port: p), format: format.transportFormat, decodePGNs: false))
+	}
+}
+
+/// Drives a command session: consumes the frames (device claims, format
+/// detection), broadcasts the roll call, runs `body`, tears down.
+private func withCommandSession(
+	_ session: NMEASession, body: (NMEASession) async throws -> Void
+) async rethrows {
+	let consumer = Task {
+		do {
+			for try await _ in session.frames { try Task.checkCancellation() }
+		} catch {}
+	}
+	defer { consumer.cancel() }
+	// Let the connection settle and the wire format resolve, then make the
+	// devices announce themselves.
+	try? await Task.sleep(for: .seconds(1))
+	try? await session.interrogateDevices()
+	try await body(session)
+	// Leave the gateway time to flush the last command onto the bus.
+	try? await Task.sleep(for: .milliseconds(700))
+}
+
+/// Polls `find` every half second until it returns a value or the timeout
+/// elapses.
+private func waitForDevice<T>(seconds: Int, _ find: () -> T?) async -> T? {
+	for _ in 0..<(seconds * 2) {
+		if let found = find() { return found }
+		try? await Task.sleep(for: .milliseconds(500))
+	}
+	return find()
+}
+
+struct PilotCommand: AsyncParsableCommand {
+	static let configuration = CommandConfiguration(
+		commandName: "pilot",
+		abstract: "Send an order to the autopilot",
+		discussion: """
+			Identifies the autopilot on the NMEA 2000 network (ISO class 40,
+			function 150) and speaks its brand's dialect — currently the
+			Raymarine Evolution sequences (mode writes, SeaTalk keystrokes);
+			other brands are reported by name but not yet driven.
+
+			Actions:
+			  standby            disengage
+			  auto               engage, heading-hold mode
+			  wind               engage, wind-vane mode
+			  track              engage, track mode
+			  +N / -N            alter course by N degrees (e.g. +10, -1)
+			  heading D          set the locked heading to D degrees magnetic
+			"""
+	)
+
+	@OptionGroup var endpoint: CommandEndpointOptions
+
+	@Argument(help: "standby | auto | wind | track | +N | -N | heading")
+	var action: String
+
+	@Argument(help: "Degrees, for the heading action")
+	var degrees: Double?
+
+	private func parseAction() throws -> AutopilotCommand {
+		switch action.lowercased() {
+		case "standby": return .standby
+		case "auto", "engage": return .engage
+		case "wind": return .windVane
+		case "track", "route": return .track
+		case "heading":
+			guard let degrees else {
+				throw ValidationError("heading needs a value in degrees — e.g. pilot heading 235")
+			}
+			return .lockHeading(degrees: degrees)
+		default:
+			if let step = Int(action), step != 0 { return .adjustHeading(degrees: step) }
+			throw ValidationError("unknown action '\(action)'")
+		}
+	}
+
+	func run() async throws {
+		let command = try parseAction()
+		let session = try endpoint.openSession()
+		try await withCommandSession(session) { session in
+			print("Interrogating the network for the autopilot…")
+			guard let pilot = await waitForDevice(seconds: endpoint.timeout, { session.autopilot() })
+			else {
+				throw ValidationError(
+					"no autopilot heard on the network — devices seen: "
+						+ (session.devices().map(\.displayName).joined(separator: ", ").nonEmpty ?? "none"))
+			}
+			print("Autopilot @\(pilot.device.address) — \(pilot.device.displayName) (\(pilot.brand.label))")
+			try await session.send(command)
+			print("Sent: \(action)\(degrees.map { " \($0)" } ?? "")")
+		}
+	}
+}
+
+struct WindlassCLICommand: AsyncParsableCommand {
+	static let configuration = CommandConfiguration(
+		commandName: "windlass",
+		abstract: "Drive the anchor windlass",
+		discussion: """
+			Sends the standard NMEA 2000 windlass order (a command of PGN
+			128776) — addressed to the windlass heard on the network, or
+			broadcast when none identified itself.
+			"""
+	)
+
+	@OptionGroup var endpoint: CommandEndpointOptions
+
+	@Argument(help: "up | down | off")
+	var action: String
+
+	@Option(help: "Windlass identifier, on installations with more than one")
+	var windlass: Int = 0
+
+	func run() async throws {
+		let command: WindlassCommand
+		switch action.lowercased() {
+		case "up": command = .up
+		case "down": command = .down
+		case "off", "stop": command = .off
+		default: throw ValidationError("unknown action '\(action)' — expected up, down or off")
+		}
+		let session = try endpoint.openSession()
+		try await withCommandSession(session) { session in
+			// The windlass is optional — the ID field addresses it anyway.
+			let device = await waitForDevice(seconds: min(endpoint.timeout, 5)) {
+				NMEA2000Commands.windlass(in: session.devices())
+			}
+			if let device {
+				print("Windlass @\(device.address) — \(device.displayName)")
+			} else {
+				print("No windlass identified — broadcasting.")
+			}
+			try await session.send(command, windlassID: UInt8(clamping: windlass))
+			print("Sent: \(action)")
 		}
 	}
 }

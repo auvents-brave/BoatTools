@@ -166,6 +166,7 @@ frames to the clients and the metric store and let them dispatch.
 - `NMEASession` — a live connection: the inbound `frames` stream plus, on TCP, transmission onto the network. `send(_:)` encodes an `OutboundMessage` in the connection's wire format; `isTransmitCapable` tells whether the connection can speak at all; `devices()` / `device(at:)` expose the connection's own device directory; `interrogateDevices(destination:)` broadcasts the ISO Request roll call.
 - `OutboundMessage` — a protocol-neutral message to transmit (an autopilot command, a windlass order, an ISO request): `.nmea0183(body:)` gains its `$` and checksum, `.nmea2000(pgn:destination:priority:data:)` is encoded per gateway envelope — RAW frames with fast-packet fragmentation, iKonvert `!PDGY`, SeaSmart `$PCDIN`. Receive-only formats (Signal K, Canboat PLAIN, UDP listeners) refuse to transmit.
 - `ConnectionMultiplexer.send(_:toDeviceAt:)` — routes an outbound message in "listen to everything" mode: to the session(s) that heard the target source address when known, otherwise to every transmit-capable session.
+- `NMEA2000Commands` — command builders for the devices a sailor drives. `autopilot(in:)` identifies the pilot (ISO class 40 / function 150) and selects its dialect from the manufacturer code (`AutopilotBrand`); `messages(for:brand:destination:)` encodes an `AutopilotCommand` (standby / engage / wind-vane / track / ±N° / locked heading) — the Raymarine Evolution dialect is implemented (126208 writes of 65379 and 65360, SeaTalk 126720 keystrokes), other brands are named but refused. `message(for:windlassID:destination:)` builds the **standard** windlass order (a 126208 command of PGN 128776) — `WindlassCommand`: up / down / off. `NMEASession.send(_: AutopilotCommand)` / `.send(_: WindlassCommand, windlassID:)` resolve the target device from the session's directory.
 - `NMEATransportMode`, `NMEAInputFormat` — configuration enums.
 - `NMEA2000DeviceDirectory` / `NMEA2000Device` — inventory of the devices on the NMEA 2000 network, accumulated from the device-information PGNs (60928 address claims, 126996 product information, 126998 configuration information, 126464 PGN lists, 126993 heartbeats): manufacturer, model, serial, versions, class / function, instances, load equivalency, PGN lists, last seen. `interrogationLines(destination:)` yields the ISO Requests (YD RAW transmit format) that make every device announce itself.
 - `ConnectionOwnershipManager` — AppGroup-backed primary / secondary election so several processes (e.g. main app + widget) can share one upstream connection.
@@ -208,6 +209,8 @@ Which NMEA 0183 sentences, NMEA 2000 PGNs and Signal K paths `BoatToolsKit` deco
 ```
 boattools connect    — all transports: TCP, UDP broadcast/multicast, Signal K web
 boattools devices    — inventory the devices present on the NMEA 2000 network
+boattools pilot      — send an order to the autopilot (brand dialect auto-selected)
+boattools windlass   — drive the anchor windlass (standard NMEA 2000 order)
 boattools file       — read and parse a local log file
 boattools vrm        — Victron VRM cloud
 boattools discover   — LAN discovery via Bonjour/mDNS
@@ -391,6 +394,28 @@ equivalency, transmitted and received PGNs.
 On UDP (receive-only) the command stays passive; use `--no-request` to force
 the same on TCP. Signal K web sources do not relay these PGNs — point the
 command at the gateway itself.
+
+---
+
+### Drive the autopilot and the windlass
+
+```sh
+# Identify the pilot (ISO class 40 / function 150), speak its dialect
+./boattools pilot auto --host 10.0.0.50 --port 1457
+./boattools pilot -- -10 --host 10.0.0.50 --port 1457     # 10° to port
+./boattools pilot heading 235 --host 10.0.0.50 --port 1457
+./boattools pilot standby --host 10.0.0.50 --port 1457
+
+# The standard NMEA 2000 windlass order (a command of PGN 128776)
+./boattools windlass up --host 10.0.0.50 --port 1457
+./boattools windlass off --host 10.0.0.50 --port 1457
+```
+
+The pilot command first broadcasts the ISO Request roll call, waits for the
+autopilot's address claim, then encodes the order in the brand's dialect —
+currently the Raymarine Evolution sequences (mode writes of PGN 65379, locked
+heading via 65360, SeaTalk keystrokes via 126720); other brands are identified
+and reported, but not yet driven. Commands need a transmit-capable TCP gateway.
 
 ---
 

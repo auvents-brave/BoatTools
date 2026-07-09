@@ -376,6 +376,83 @@ public func boattools_bridge_interrogate(_ handle: Int64) -> Int32 {
 	return 1
 }
 
+/// Sends an order to the autopilot heard on the connection, in its brand's
+/// dialect. `action` is one of `standby`, `auto`, `wind`, `track`, `adjust`
+/// (relative degrees in `value`) or `heading` (absolute magnetic degrees in
+/// `value`).
+/// - Returns: JSON `{"ok",...}` — on success with the pilot's identity
+///   (`{"ok":true,"pilot":{"address","name","brand"}}`), else with an
+///   `error` message (cannot transmit, no pilot heard, unknown action, or a
+///   dialect not yet implemented). Release with `boattools_bridge_string_free`.
+@_cdecl("boattools_bridge_autopilot")
+public func boattools_bridge_autopilot(
+	_ handle: Int64, _ action: UnsafePointer<CChar>?, _ value: Double
+) -> UnsafeMutablePointer<CChar>? {
+	func failure(_ message: String) -> UnsafeMutablePointer<CChar>? {
+		cString(#"{"ok":false,"error":"\#(message)"}"#)
+	}
+	guard let session = registry.session(handle), session.isTransmitCapable else {
+		return failure("connection cannot transmit")
+	}
+	let command: AutopilotCommand
+	switch action.map({ String(cString: $0).lowercased() }) {
+	case "standby": command = .standby
+	case "auto", "engage": command = .engage
+	case "wind": command = .windVane
+	case "track", "route": command = .track
+	case "adjust": command = .adjustHeading(degrees: Int(value.rounded()))
+	case "heading": command = .lockHeading(degrees: value)
+	default: return failure("unknown action")
+	}
+	guard let pilot = session.autopilot() else {
+		return failure("no autopilot heard — interrogate first")
+	}
+	let messages: [OutboundMessage]
+	do {
+		messages = try NMEA2000Commands.messages(
+			for: command, brand: pilot.brand, destination: pilot.device.address)
+	} catch {
+		return failure("the \(pilot.brand.label) dialect is not implemented yet")
+	}
+	Task {
+		for message in messages { try? await session.send(message) }
+	}
+	let payload: [String: Any] = [
+		"ok": true,
+		"pilot": [
+			"address": Int(pilot.device.address),
+			"name": pilot.device.displayName,
+			"brand": pilot.brand.label,
+		],
+	]
+	guard let data = try? JSONSerialization.data(withJSONObject: payload) else {
+		return failure("encoding failed")
+	}
+	return cString(String(decoding: data, as: UTF8.self))
+}
+
+/// Drives the anchor windlass — the standard NMEA 2000 order, addressed to
+/// the windlass heard on the connection or broadcast otherwise. `direction`
+/// is 0 (off), 1 (down) or 2 (up).
+/// - Returns: 1 when the order was dispatched, 0 when the connection cannot
+///   transmit or the direction is invalid.
+@_cdecl("boattools_bridge_windlass")
+public func boattools_bridge_windlass(
+	_ handle: Int64, _ direction: Int32, _ windlassID: Int32
+) -> Int32 {
+	guard let session = registry.session(handle), session.isTransmitCapable else { return 0 }
+	let command: WindlassCommand
+	switch direction {
+	case 0: command = .off
+	case 1: command = .down
+	case 2: command = .up
+	default: return 0
+	}
+	let id = UInt8(clamping: windlassID)
+	Task { try? await session.send(command, windlassID: id) }
+	return 1
+}
+
 /// Closes a connection and releases its handle. Safe on unknown handles.
 @_cdecl("boattools_bridge_close")
 public func boattools_bridge_close(_ handle: Int64) {
