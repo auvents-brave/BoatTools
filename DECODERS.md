@@ -237,6 +237,21 @@ PGNs larger than 8 bytes (fast-packet) are reassembled across multiple CAN frame
 | `129809` | AIS Class B "CS" Static Data, Part A | 24A |
 | `129810` | AIS Class B "CS" Static Data, Part B | 24B |
 
+### Network device information
+
+Decoded into `NMEA2000Device` records by `NMEA2000DeviceDirectory` (one per
+source address) rather than into metrics — surfaced by `boattools devices`
+and `boattools_bridge_devices`.
+
+| PGN | Name | Decoded fields |
+|---|---|---|
+| `59904` | ISO Request | *emitted* by `interrogationLines(destination:)` to trigger a network roll call — requests 60928, 126996, 126998 and 126464 |
+| `60928` | ISO Address Claim | the 64-bit NAME: unique number, manufacturer code (with registered-name lookup), device instance, device function and class (with ISO label lookup), system instance, industry group, arbitrary-address capability |
+| `126464` | PGN List | transmitted PGNs / received PGNs (split by the function byte) |
+| `126993` | Heartbeat | update interval; refreshes the device's last-seen date |
+| `126996` | Product Information | NMEA 2000 database version, product code, model ID, software version, model version, serial code, certification level, load equivalency (LEN) |
+| `126998` | Configuration Information | installation descriptions 1 and 2, manufacturer information (variable-length strings) |
+
 ---
 
 ## Signal K

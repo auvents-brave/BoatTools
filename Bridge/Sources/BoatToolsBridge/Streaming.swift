@@ -43,6 +43,76 @@ struct PollPayload: Encodable {
 	let ais: [AisPayload]
 }
 
+/// One NMEA 2000 network device, as serialised to the C# side. Labels come
+/// pre-resolved (manufacturer, class and function names) so the host needs no
+/// tables of its own.
+struct DevicePayload: Encodable {
+	let address: Int
+	let name: String
+	let manufacturer: String?
+	let manufacturerCode: Int?
+	let uniqueNumber: Int?
+	let deviceClass: String?
+	let deviceFunction: String?
+	let deviceInstance: Int?
+	let systemInstance: Int?
+	let industryGroup: String?
+	let selfAddressing: Bool?
+	let model: String?
+	let productCode: Int?
+	let nmea2000Version: Double?
+	let software: String?
+	let modelVersion: String?
+	let serial: String?
+	let certification: Int?
+	let len: Int?
+	let installation1: String?
+	let installation2: String?
+	let manufacturerInfo: String?
+	let transmits: [Int]?
+	let receives: [Int]?
+	/// Heartbeat interval in seconds.
+	let heartbeat: Double?
+	/// Seconds since the Unix epoch.
+	let lastSeen: Double
+
+	init(_ device: NMEA2000Device) {
+		address = Int(device.address)
+		name = device.displayName
+		manufacturer = device.manufacturerName
+		manufacturerCode = device.manufacturerCode.map(Int.init)
+		uniqueNumber = device.uniqueNumber.map(Int.init)
+		deviceClass = device.deviceClassName
+		deviceFunction = device.deviceFunctionName
+		deviceInstance = device.deviceInstance.map(Int.init)
+		systemInstance = device.systemInstance.map(Int.init)
+		industryGroup = device.industryGroupName
+		selfAddressing = device.arbitraryAddressCapable
+		model = device.modelID
+		productCode = device.productCode.map(Int.init)
+		nmea2000Version = device.nmea2000Version
+		software = device.softwareVersion
+		modelVersion = device.modelVersion
+		serial = device.serialNumber
+		certification = device.certificationLevel.map(Int.init)
+		len = device.loadEquivalency.map(Int.init)
+		installation1 = device.installationDescription1
+		installation2 = device.installationDescription2
+		manufacturerInfo = device.manufacturerInformation
+		transmits = device.transmittedPGNs.map { $0.map(Int.init) }
+		receives = device.receivedPGNs.map { $0.map(Int.init) }
+		heartbeat = device.heartbeatInterval
+		lastSeen = device.lastSeen.timeIntervalSince1970
+	}
+}
+
+/// What one `boattools_bridge_devices` call returns.
+struct DevicesPayload: Encodable {
+	/// Same values as ``PollPayload/status``.
+	let status: String
+	let devices: [DevicePayload]
+}
+
 // MARK: - Connection
 
 /// One live connection: the consuming task appends, `drain()` empties the
@@ -53,6 +123,7 @@ final class BridgeConnection: Sendable {
 		var error: String?
 		var metrics: [MetricPayload] = []
 		var targets: [Int: (target: AISTarget, seen: Date)] = [:]
+		var devices = NMEA2000DeviceDirectory()
 	}
 
 	private let state = Mutex(State())
@@ -83,6 +154,20 @@ final class BridgeConnection: Sendable {
 				let horizon = Date().addingTimeInterval(-3600)
 				s.targets = s.targets.filter { $0.value.seen > horizon }
 			}
+		}
+	}
+
+	/// Feeds one raw NMEA 2000 frame into the connection's device directory.
+	func observeDevice(pgn: UInt32, source: UInt8, data: [UInt8]) {
+		state.withLock { s in
+			s.devices.apply(pgn: pgn, source: source, data: data)
+		}
+	}
+
+	/// The network device inventory as of now.
+	func devicesPayload() -> DevicesPayload {
+		state.withLock { s in
+			DevicesPayload(status: s.status, devices: s.devices.devices.map(DevicePayload.init))
 		}
 	}
 
@@ -165,6 +250,8 @@ final class ConnectionRegistry: Sendable {
 					switch frame {
 					case .metric(let metric): connection.append(metric)
 					case .aisTarget(let target): connection.update(target)
+					case .nmea2000(let pgn, let source, _, let data):
+						connection.observeDevice(pgn: pgn, source: source, data: data)
 					default: break
 					}
 				}
@@ -243,6 +330,24 @@ public func boattools_bridge_poll(_ handle: Int64) -> UnsafeMutablePointer<CChar
 	}
 	guard let data = try? JSONEncoder().encode(connection.drain()) else {
 		return cString(#"{"status":"failed","error":"encoding failed","metrics":[],"ais":[]}"#)
+	}
+	return cString(String(decoding: data, as: UTF8.self))
+}
+
+/// The inventory of the devices heard on the NMEA 2000 network over this
+/// connection, as JSON: `{"status","devices":[{address,name,manufacturer,
+/// deviceClass,deviceFunction,model,serial,software,transmits,receives,
+/// heartbeat,lastSeen,…}]}`. Labels come pre-resolved; absent fields were not
+/// (yet) announced by the device — devices announce on power-up, on an ISO
+/// Request, and via periodic heartbeats.
+/// - Returns: A JSON string to release with `boattools_bridge_string_free`.
+@_cdecl("boattools_bridge_devices")
+public func boattools_bridge_devices(_ handle: Int64) -> UnsafeMutablePointer<CChar>? {
+	guard let connection = registry.connection(handle) else {
+		return cString(#"{"status":"unknown","devices":[]}"#)
+	}
+	guard let data = try? JSONEncoder().encode(connection.devicesPayload()) else {
+		return cString(#"{"status":"failed","devices":[]}"#)
 	}
 	return cString(String(decoding: data, as: UTF8.self))
 }
