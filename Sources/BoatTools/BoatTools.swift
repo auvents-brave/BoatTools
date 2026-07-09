@@ -959,7 +959,6 @@ struct DevicesCommand: AsyncParsableCommand {
 		case .tcp(let h, let p):
 			config = NMEATransportConfig(
 				mode: .tcp(host: h, port: p), format: format.transportFormat, decodePGNs: false)
-			if request { Self.interrogate(host: h, port: p) }
 		case .udpBroadcast(let p):
 			config = NMEATransportConfig(
 				mode: .udp(listenPort: p, multicastGroup: nil),
@@ -972,10 +971,13 @@ struct DevicesCommand: AsyncParsableCommand {
 
 		print("Listening for device-information PGNs\(duration > 0 ? " for \(duration) s" : "")…")
 
+		let session = NMEATransport.session(config: config)
+		if request { Self.interrogate(session) }
+
 		let consumer = Task {
 			var directory = NMEA2000DeviceDirectory()
 			do {
-				for try await frame in NMEATransport.frameStream(config: config) {
+				for try await frame in session.frames {
 					try Task.checkCancellation()
 					guard case .nmea2000(let pgn, let source, _, let data) = frame else { continue }
 					let known = directory[source] != nil
@@ -999,21 +1001,16 @@ struct DevicesCommand: AsyncParsableCommand {
 		renderDeviceInventory(directory.devices)
 	}
 
-	/// Broadcasts the ISO Requests over a second connection to the gateway —
-	/// the answers arrive on the listening stream. Failures are silent: the
-	/// command still collects whatever the bus broadcasts spontaneously.
-	private static func interrogate(host: String, port: Int) {
+	/// Broadcasts the ISO Request roll call on the session itself — the
+	/// answers arrive on the same stream. Failures are silent: the command
+	/// still collects whatever the bus broadcasts spontaneously (UDP sources
+	/// are receive-only, and auto-detection needs a first line before the
+	/// session can encode).
+	private static func interrogate(_ session: NMEASession) {
 		Task {
-			// Let the listening connection settle first.
+			// Let the connection settle and the wire format resolve first.
 			try? await Task.sleep(for: .seconds(1))
-			guard let connection = try? await NetworkStack.tcp.connect(host: host, port: port)
-			else { return }
-			for line in NMEA2000DeviceDirectory.interrogationLines() {
-				try? await connection.send(Array((line + "\r\n").utf8))
-			}
-			// Leave the gateway time to flush the requests onto the bus.
-			try? await Task.sleep(for: .milliseconds(500))
-			await connection.close()
+			try? await session.interrogateDevices()
 		}
 	}
 }

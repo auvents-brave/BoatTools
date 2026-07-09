@@ -232,6 +232,9 @@ final class ConnectionRegistry: Sendable {
 	private struct Entry {
 		let connection: BridgeConnection
 		let task: Task<Void, Never>
+		/// The transport session behind the stream, when the connection can
+		/// also transmit (TCP) — nil for simulator and device-feed handles.
+		let session: NMEASession?
 	}
 
 	private struct State {
@@ -242,7 +245,9 @@ final class ConnectionRegistry: Sendable {
 	private let state = Mutex(State())
 
 	/// Starts consuming `stream` and returns the handle for poll / close.
-	func open(_ stream: AsyncThrowingStream<NMEAFrame, any Error>) -> Int64 {
+	func open(
+		_ stream: AsyncThrowingStream<NMEAFrame, any Error>, session: NMEASession? = nil
+	) -> Int64 {
 		let connection = BridgeConnection()
 		let task = Task {
 			do {
@@ -263,13 +268,17 @@ final class ConnectionRegistry: Sendable {
 		return state.withLock { s in
 			let handle = s.nextHandle
 			s.nextHandle += 1
-			s.entries[handle] = Entry(connection: connection, task: task)
+			s.entries[handle] = Entry(connection: connection, task: task, session: session)
 			return handle
 		}
 	}
 
 	func connection(_ handle: Int64) -> BridgeConnection? {
 		state.withLock { $0.entries[handle]?.connection }
+	}
+
+	func session(_ handle: Int64) -> NMEASession? {
+		state.withLock { $0.entries[handle]?.session }
 	}
 
 	func close(_ handle: Int64) {
@@ -290,7 +299,8 @@ let registry = ConnectionRegistry()
 public func boattools_bridge_open_tcp(_ host: UnsafePointer<CChar>?, _ port: Int32) -> Int64 {
 	guard let host, port > 0 else { return 0 }
 	let config = NMEATransportConfig(mode: .tcp(host: String(cString: host), port: Int(port)))
-	return registry.open(NMEATransport.frameStream(config: config))
+	let session = NMEATransport.session(config: config)
+	return registry.open(session.frames, session: session)
 }
 
 /// Opens a UDP receiver bound to `port`, optionally joining a multicast group
@@ -350,6 +360,20 @@ public func boattools_bridge_devices(_ handle: Int64) -> UnsafeMutablePointer<CC
 		return cString(#"{"status":"failed","devices":[]}"#)
 	}
 	return cString(String(decoding: data, as: UTF8.self))
+}
+
+/// Broadcasts the ISO Request roll call on the connection, so every device
+/// on the NMEA 2000 network announces itself — collect the answers with
+/// `boattools_bridge_devices`. Only TCP connections whose wire format accepts
+/// transmissions can do this; format auto-detection needs at least one
+/// received line first.
+/// - Returns: 1 when the requests were dispatched, 0 when the connection
+///   cannot transmit (unknown handle, UDP/simulator, or format unresolved).
+@_cdecl("boattools_bridge_interrogate")
+public func boattools_bridge_interrogate(_ handle: Int64) -> Int32 {
+	guard let session = registry.session(handle), session.isTransmitCapable else { return 0 }
+	Task { try? await session.interrogateDevices() }
+	return 1
 }
 
 /// Closes a connection and releases its handle. Safe on unknown handles.

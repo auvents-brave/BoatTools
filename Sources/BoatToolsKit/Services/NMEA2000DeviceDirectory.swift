@@ -229,23 +229,32 @@ public struct NMEA2000DeviceDirectory: Sendable {
 
 	// MARK: Interrogation
 
-	/// The ISO Request (PGN 59904) transmit lines that make every device
-	/// announce itself, in the Yacht Devices RAW gateway format (`canid data…`,
-	/// one per line). Send them over a transmit-capable RAW TCP gateway, then
-	/// collect the answers with ``apply(pgn:source:data:at:)``.
+	/// The ISO Requests (PGN 59904) that make every device announce itself —
+	/// one ``OutboundMessage`` per requested PGN (address claim, product
+	/// information, configuration information, PGN list). Send them with
+	/// ``NMEASession/send(_:)`` — or ``NMEASession/interrogateDevices(destination:)``,
+	/// which does exactly this — then collect the answers with
+	/// ``apply(pgn:source:data:at:)``.
 	///
 	/// - Parameter destination: The queried address. Defaults to 255, the
 	///   global address — every device answers.
-	/// - Returns: One line per requested PGN (address claim, product
-	///   information, configuration information, PGN list).
+	public static func interrogationMessages(destination: UInt8 = 255) -> [OutboundMessage] {
+		[60928 as UInt32, 126996, 126998, 126464].map { pgn in
+			.nmea2000(
+				pgn: 59904, destination: destination, priority: 6,
+				data: [UInt8(pgn & 0xFF), UInt8((pgn >> 8) & 0xFF), UInt8((pgn >> 16) & 0xFF)])
+		}
+	}
+
+	/// The ISO Request transmit lines in the Yacht Devices RAW gateway format
+	/// (`canid data…`, one per line) — ``interrogationMessages(destination:)``
+	/// pre-encoded for callers that talk to a RAW gateway directly.
+	///
+	/// - Parameter destination: The queried address. Defaults to 255, the
+	///   global address — every device answers.
 	public static func interrogationLines(destination: UInt8 = 255) -> [String] {
-		// ISO Request is PDU1: PF 0xEA, PS = destination. Priority 6, source
-		// 254 (the ISO null address — we are not a claimed device).
-		let canID: UInt32 = 6 << 26 | 0xEA << 16 | UInt32(destination) << 8 | 0xFE
-		return [60928 as UInt32, 126996, 126998, 126464].map { pgn in
-			let bytes = [UInt8(pgn & 0xFF), UInt8((pgn >> 8) & 0xFF), UInt8((pgn >> 16) & 0xFF)]
-			let payload = bytes.map { String(format: "%02X", $0) }.joined(separator: " ")
-			return String(format: "%08X ", canID) + payload
+		interrogationMessages(destination: destination).flatMap { message in
+			OutboundEncoder.lines(message, format: .yachtDevicesRaw) ?? []
 		}
 	}
 
