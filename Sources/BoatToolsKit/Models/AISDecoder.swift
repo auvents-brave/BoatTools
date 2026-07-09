@@ -69,10 +69,15 @@ public struct AISTarget: Sendable, Equatable {
 
 	/// A type-5 ETA: month / day / hour / minute, with no year (AIS omits it).
 	public struct ETA: Sendable, Equatable {
+		/// Month of arrival (1–12).
 		public let month: Int
+		/// Day of the month (1–31).
 		public let day: Int
+		/// Hour of arrival (0–23).
 		public let hour: Int
+		/// Minute of arrival (0–59).
 		public let minute: Int
+		/// Creates an ETA from its month, day, hour and minute components.
 		public init(month: Int, day: Int, hour: Int, minute: Int) {
 			self.month = month
 			self.day = day

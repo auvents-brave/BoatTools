@@ -7,6 +7,16 @@ The package ships two products:
 - **`BoatToolsKit`** — library, multiplatform. All the business logic: NMEA / Signal K / Victron VRM clients, parsers, Bonjour discovery, Apple device sensors.
 - **`boattools`** — executable, ArgumentParser-based CLI on top of the library. Six subcommands: `connect`, `file`, `vrm`, `discover`, `gmdss`, `simulate`. The Apple device sensors are a `BoatToolsKit` feature only — they are not exposed by the CLI.
 
+A third piece lives in the nested [`Bridge/`](Bridge) package:
+**libBoatToolsBridge**, a dynamic library exposing `BoatToolsKit` through a
+plain C ABI (`boattools_bridge_*`) — NMEA parsing, streaming connections
+(TCP / UDP / simulator, polled), a device-sensor feed, AIS target details and
+GMDSS forecasts — so non-Swift hosts (C# via P/Invoke, Python via ctypes…)
+reuse the same decoding and transports instead of reimplementing them. Build
+it with `swift build -c release` from `Bridge/` (on Windows, pass the CCurl
+include/lib flags as for the CLI); every returned string is a caller-owned
+UTF-8 buffer released with `boattools_bridge_string_free`.
+
 ## Install
 
 Download pre-built binaries for **macOS, Windows and Linux** from the

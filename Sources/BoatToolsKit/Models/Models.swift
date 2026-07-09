@@ -137,6 +137,7 @@ public struct BoatMetric: Sendable, Equatable, Hashable, CustomStringConvertible
 		self.timestamp = timestamp
 	}
 
+	/// A human-readable `"name = value unit"` rendering of the metric.
 	public var description: String {
 		unit.map { "\(name) = \(value) \($0)" } ?? "\(name) = \(value)"
 	}

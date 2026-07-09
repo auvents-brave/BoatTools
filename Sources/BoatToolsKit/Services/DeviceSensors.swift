@@ -156,6 +156,7 @@
 
 	extension DeviceSensors: @preconcurrency CLLocationManagerDelegate {
 
+		/// Yields position, altitude, speed and course metrics from the latest fix.
 		public func locationManager(
 			_ manager: CLLocationManager,
 			didUpdateLocations locations: [CLLocation]
@@ -184,6 +185,7 @@
 			}
 		}
 
+		/// Ends the stream on fatal errors; transient location failures are ignored.
 		public func locationManager(
 			_ manager: CLLocationManager,
 			didFailWithError error: any Error
@@ -203,6 +205,7 @@
 		// Negative guard mirrors startUpdatingHeading() above and covers iOS,
 		// macCatalyst, watchOS, and visionOS automatically.
 		#if !os(macOS) && !os(tvOS) && !os(visionOS)
+			/// Yields magnetic and true heading metrics, plus derived magnetic variation.
 			public func locationManager(
 				_ manager: CLLocationManager,
 				didUpdateHeading newHeading: CLHeading

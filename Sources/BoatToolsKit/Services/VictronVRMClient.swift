@@ -62,6 +62,8 @@ public final class VictronVRMClient: Sendable {
 			case instance, formatWithUnit
 		}
 
+		/// Decodes a diagnostic record, tolerating VRM's mix of numeric and string
+		/// raw values and its capitalised `Device` key.
 		public init(from decoder: any Decoder) throws {
 			let c = try decoder.container(keyedBy: K.self)
 			idDataAttribute = try? c.decodeIfPresent(Int.self, forKey: .idDataAttribute)

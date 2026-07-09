@@ -16,6 +16,7 @@ public struct GMDSSBulletin: Sendable, Identifiable {
 	/// The bulletin body, line by line in document order.
 	public let lines: [String]
 
+	/// Stable identity, derived from the sub-area ``label``.
 	public var id: String { label }
 
 	/// The body as plain text.
@@ -116,7 +117,13 @@ public struct GMDSSForecastService: Sendable {
 
 	/// Keeps the directional bulletins covering a position; falls back to all of
 	/// them when the METAREA carries no directional split.
-	static func bulletins(
+	/// - Parameters:
+	///   - bulletins: The METAREA's full bulletin set.
+	///   - lat: Decimal degrees, north positive.
+	///   - lon: Decimal degrees, east positive.
+	///   - area: The METAREA whose split applies.
+	/// - Returns: The bulletins covering the position.
+	public static func bulletins(
 		_ bulletins: [GMDSSBulletin], coveringLatitude lat: Double, longitude lon: Double, in area: Metarea
 	) -> [GMDSSBulletin] {
 		guard bulletins.count > 1 else { return bulletins }
@@ -149,7 +156,9 @@ public struct GMDSSForecastService: Sendable {
 
 	/// A METAREA's number and approximate bounding box.
 	public struct Metarea: Sendable {
+		/// METAREA number, 1…21.
 		public let number: Int
+		/// The bounding box edges, in degrees of latitude and longitude.
 		public let minLat, maxLat, minLon, maxLon: Double
 		func contains(_ lat: Double, _ lon: Double) -> Bool {
 			lat >= minLat && lat <= maxLat && lon >= minLon && lon <= maxLon
