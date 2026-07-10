@@ -79,7 +79,9 @@ final class SimulatedDevices: @unchecked Sendable {
 				windlasses[Int(id)].direction = direction
 			}
 		case 65379:
-			// The Raymarine mode write — mode u16 rides bytes 12-13.
+			// The Raymarine mode write — mode u16 rides bytes 12-13. A write
+			// leaving the mode unchanged (0xFFFF) with sub-mode 4 is the
+			// Axiom's tack command.
 			guard d.count >= 14 else { return }
 			switch UInt16(d[12]) | UInt16(d[13]) << 8 {
 			case 0: pilot.mode = 0
@@ -88,6 +90,10 @@ final class SimulatedDevices: @unchecked Sendable {
 				pilot.target = heading
 			case 256: pilot.mode = 2
 			case 384, 385: pilot.mode = 3
+			case 0xFFFF:
+				if d.count >= 17, d[14] == 0x05, UInt16(d[15]) | UInt16(d[16]) << 8 == 4 {
+					tack()
+				}
 			default: break
 			}
 		case 65360:

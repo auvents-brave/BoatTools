@@ -253,9 +253,22 @@ public enum NMEA2000Commands {
 			let (ten, one): (UInt8, UInt8) = degrees < 0 ? (0x06, 0x05) : (0x08, 0x07)
 			let keys = [UInt8](repeating: ten, count: tens) + [UInt8](repeating: one, count: ones)
 			return keys.map { raymarineKeystroke($0, destination: destination) }
-		case .tack(let toPort):
-			// The −1−10 / +1+10 key pairs — the pilot's tack chords.
-			return [raymarineKeystroke(toPort ? 0x21 : 0x22, destination: destination)]
+		case .tack:
+			// Reverse-engineered from a Raymarine Axiom MFD (the Signal K
+			// plugin's recipe): a 65379 write with the mode left unchanged
+			// (0xFFFF) and sub-mode 4 — the EV computer tacks from the
+			// current wind angle, picking the side itself.
+			return [
+				.nmea2000(
+					pgn: 126208, destination: destination, priority: 3,
+					data: [
+						0x01, 0x63, 0xFF, 0x00, 0xF8, 0x04,
+						0x01, 0x3B, 0x07,  // manufacturer 1851
+						0x03, 0x04,  // industry group: marine
+						0x04, 0xFF, 0xFF,  // pilot mode: leave unchanged
+						0x05, 0x04, 0x00,  // sub-mode 4: execute a tack
+					])
+			]
 		case .lockHeading(let degrees):
 			// A 126208 write of PGN 65360's target-heading field, in 1e-4 rad.
 			let radians = degrees.truncatingRemainder(dividingBy: 360) * .pi / 180

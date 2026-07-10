@@ -204,14 +204,14 @@ struct CommandsTests {
 	}
 
 	@Test func `tack rides the key chords, the Simnet event and the Signal K action`() throws {
-		let port = try NMEA2000Commands.messages(
+		// Evolution: the Axiom's 65379 write — mode unchanged, sub-mode 4.
+		let evolution = try NMEA2000Commands.messages(
 			for: .tack(toPort: true), brand: .raymarineEvolution, destination: 204)
-		if case .nmea2000(let pgn, _, _, let data)? = port.first {
-			#expect(pgn == 126720)
-			#expect(data[6] == 0x21)
-			#expect(data[7] == 0xDE)
+		if case .nmea2000(let pgn, _, _, let data)? = evolution.first {
+			#expect(pgn == 126208)
+			#expect(Array(data.suffix(6)) == [0x04, 0xFF, 0xFF, 0x05, 0x04, 0x00])
 		} else {
-			Issue.record("expected a keystroke")
+			Issue.record("expected a 65379 write")
 		}
 		let navico = try NMEA2000Commands.messages(for: .tack(toPort: false), brand: .navico, destination: 3)
 		if case .nmea2000(let pgn, _, _, let data)? = navico.first {

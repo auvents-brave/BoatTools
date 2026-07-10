@@ -443,7 +443,7 @@ Signal K requests.
 
 | Pilot | Frames sent |
 |---|---|
-| Raymarine Evolution | PGN `126208` writes of proprietary `65379` (mode: standby, auto, wind, track) and `65360` (locked heading, 1e-4 rad); PGN `126720` SeaTalk keystrokes (±1°, ±10°, tack chords `21`/`22`) |
+| Raymarine Evolution | PGN `126208` writes of proprietary `65379` (mode: standby, auto, wind, track; mode `FFFF` + sub-mode `4` = tack, from the Axiom's recipe) and `65360` (locked heading, 1e-4 rad); PGN `126720` SeaTalk keystrokes (±1°, ±10°) |
 | Raymarine Seatalk 1 | `$STALK,86,11,<key>,<~key>` — auto `01`, standby `02`, track `03`, wind `23`, ±1° `07`/`05`, ±10° `08`/`06`, tack `21`/`22` |
 | Navico (Simrad NAC-2/NAC-3, B&G) | PGN `130850` Simnet AP command — events: `6` standby, `9` heading, `10` nav, `15` wind, `17` tack, `26` change course (direction `2` port / `3` starboard, angle 1e-4 rad) |
 | Garmin Reactor (alpha) | PGN `126720` proprietary — states standby/auto/wind, course steps ±15°/±1° |
