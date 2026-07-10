@@ -200,6 +200,9 @@ public final class NMEASession: @unchecked Sendable {
 	// before the session escapes the factory).
 	private let lock = NSLock()
 	private var sender: (@Sendable (String) async throws -> Void)?
+	/// Direct message delivery, bypassing wire encoding — the simulator's
+	/// command path. Takes precedence over `sender` when set.
+	private var messageHandler: (@Sendable (OutboundMessage) -> Void)?
 	private var wireFormat: NMEAInputFormat
 	private var directory = NMEA2000DeviceDirectory()
 	private var sequence: UInt8 = 0
@@ -212,10 +215,13 @@ public final class NMEASession: @unchecked Sendable {
 		self.wireFormat = format
 	}
 
-	/// Whether the connection can transmit: an outbound channel exists (TCP)
-	/// and the resolved wire format accepts client transmissions.
+	/// Whether the connection can transmit: an outbound channel exists (TCP,
+	/// or the simulator's direct handler) and the resolved wire format
+	/// accepts client transmissions.
 	public var isTransmitCapable: Bool {
-		lock.withLock { sender != nil && OutboundEncoder.canTransmit(wireFormat) }
+		lock.withLock {
+			messageHandler != nil || (sender != nil && OutboundEncoder.canTransmit(wireFormat))
+		}
 	}
 
 	/// The connection's wire format — `.auto` until the first received line
@@ -242,6 +248,10 @@ public final class NMEASession: @unchecked Sendable {
 	///   receive-only, the wire format is not resolved yet (auto-detection
 	///   needs one received line), or it cannot carry this message.
 	public func send(_ message: OutboundMessage) async throws {
+		if let handler = lock.withLock({ messageHandler }) {
+			handler(message)
+			return
+		}
 		let (sender, format, sequence):
 			(
 				(@Sendable (String) async throws -> Void)?, NMEAInputFormat, UInt8
@@ -284,6 +294,10 @@ public final class NMEASession: @unchecked Sendable {
 
 	func attachSender(_ send: @escaping @Sendable (String) async throws -> Void) {
 		lock.withLock { sender = send }
+	}
+
+	func attachMessageHandler(_ handler: @escaping @Sendable (OutboundMessage) -> Void) {
+		lock.withLock { messageHandler = handler }
 	}
 
 	func resolveFormat(_ format: NMEAInputFormat) {

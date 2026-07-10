@@ -321,12 +321,14 @@ public func boattools_bridge_open_udp(_ port: Int32, _ multicastGroup: UnsafePoi
 /// - Returns: A handle (> 0).
 @_cdecl("boattools_bridge_open_simulator")
 public func boattools_bridge_open_simulator(_ speedKnots: Double, _ timeMultiplier: Double) -> Int64 {
-	registry.open(
-		NMEASimulator.frameStream(
-			route: .monacoToMaddalena,
-			speedKnots: speedKnots > 0 ? speedKnots : 6,
-			timeMultiplier: max(1, timeMultiplier)
-		))
+	// A full session: the passage plus a simulated NMEA 2000 network (an
+	// autopilot and two windlasses) that obeys the command functions.
+	let session = NMEASimulator.session(
+		route: .monacoToMaddalena,
+		speedKnots: speedKnots > 0 ? speedKnots : 6,
+		timeMultiplier: max(1, timeMultiplier)
+	)
+	return registry.open(session.frames, session: session)
 }
 
 /// Drains the metrics decoded since the previous poll, as JSON:

@@ -120,6 +120,47 @@ public enum NMEASimulator {
 		updateInterval: Duration = .seconds(1),
 		loop: Bool = true
 	) -> AsyncThrowingStream<NMEAFrame, any Error> {
+		deviceStream(
+			route: route, speedKnots: speedKnots, timeMultiplier: timeMultiplier,
+			updateInterval: updateInterval, loop: loop, devices: nil, deviceTap: nil)
+	}
+
+	/// Builds a full session for a simulated passage: the frame stream plus a
+	/// simulated NMEA 2000 network — an autopilot and two windlasses that
+	/// answer the roll call, broadcast their status and obey the commands sent
+	/// back on the session. Remote-control panels work against it exactly as
+	/// against a real gateway.
+	///
+	/// - Parameters: Same as ``frameStream(route:speedKnots:timeMultiplier:updateInterval:loop:)``.
+	/// - Returns: The live session; consume ``NMEASession/frames``.
+	public static func session(
+		route: SimulatorRoute,
+		speedKnots: Double,
+		timeMultiplier: Double = 1,
+		updateInterval: Duration = .seconds(1),
+		loop: Bool = true
+	) -> NMEASession {
+		let devices = SimulatedDevices()
+		let session = NMEASession(format: .yachtDevicesRaw)
+		session.attachMessageHandler { devices.handle($0) }
+		session.frames = deviceStream(
+			route: route, speedKnots: speedKnots, timeMultiplier: timeMultiplier,
+			updateInterval: updateInterval, loop: loop, devices: devices,
+			deviceTap: { [weak session] pgn, source, data in
+				session?.observeDevice(pgn: pgn, source: source, data: data)
+			})
+		return session
+	}
+
+	private static func deviceStream(
+		route: SimulatorRoute,
+		speedKnots: Double,
+		timeMultiplier: Double,
+		updateInterval: Duration,
+		loop: Bool,
+		devices: SimulatedDevices?,
+		deviceTap: (@Sendable (UInt32, UInt8, [UInt8]) -> Void)?
+	) -> AsyncThrowingStream<NMEAFrame, any Error> {
 		AsyncThrowingStream { continuation in
 			let task = Task {
 				let waypoints = route.waypoints
@@ -136,6 +177,9 @@ public enum NMEASimulator {
 						emit(
 							position: hold, courseDegrees: 0, speedKnots: speed,
 							tick: tick, into: continuation)
+						emitDevices(
+							devices, tap: deviceTap, heading: 0,
+							dt: dt * max(1, timeMultiplier), into: continuation)
 						tick += 1
 						try await Task.sleep(for: updateInterval)
 					}
@@ -160,6 +204,9 @@ public enum NMEASimulator {
 						route: route, legIndex: legIndex,
 						tick: tick, into: continuation)
 					emitAIS(passageSeconds: passageSeconds, tick: tick, into: continuation)
+					emitDevices(
+						devices, tap: deviceTap, heading: course,
+						dt: dt * max(1, timeMultiplier), into: continuation)
 					tick += 1
 					passageSeconds += dt * max(1, timeMultiplier)
 
@@ -503,6 +550,27 @@ public enum NMEASimulator {
 		var awa = atan2(tws * sin(twaRad), tws * cos(twaRad) + v) * 180 / .pi
 		if awa < 0 { awa += 360 }
 		return (aws, awa)
+	}
+
+	/// Yields the simulated devices' status frames — claims, pilot mode and
+	/// locked heading, windlass operating status — decoding each one into its
+	/// metrics and feeding the session's device directory through `tap`.
+	private static func emitDevices(
+		_ devices: SimulatedDevices?,
+		tap: (@Sendable (UInt32, UInt8, [UInt8]) -> Void)?,
+		heading: Double,
+		dt: Double,
+		into continuation: AsyncThrowingStream<NMEAFrame, any Error>.Continuation
+	) {
+		guard let devices else { return }
+		for frame in devices.statusFrames(heading: heading, dt: dt) {
+			continuation.yield(
+				.nmea2000(pgn: frame.pgn, source: frame.source, priority: 2, data: frame.data))
+			tap?(frame.pgn, frame.source, frame.data)
+			if let metrics = NMEA2000Decoder.decode(pgn: frame.pgn, data: frame.data) {
+				for metric in metrics { continuation.yield(.metric(metric)) }
+			}
+		}
 	}
 
 	/// Yields a raw NMEA 2000 frame and, when it decodes, its resulting metrics.
