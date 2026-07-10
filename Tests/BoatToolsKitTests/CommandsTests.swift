@@ -46,14 +46,14 @@ struct CommandsTests {
 
 	@Test func `an unsupported dialect is refused by name`() {
 		let devices = Self.inventory([
-			(9, Self.claim(manufacturer: 275, deviceClass: 40, function: 150))
+			(9, Self.claim(manufacturer: 1855, deviceClass: 40, function: 150))
 		])
 		let pilot = NMEA2000Commands.autopilot(in: devices)
-		#expect(pilot?.brand == .navico)
+		#expect(pilot?.brand == .furuno)
 		#expect {
-			try NMEA2000Commands.messages(for: .engage, brand: .navico, destination: 9)
+			try NMEA2000Commands.messages(for: .engage, brand: .furuno, destination: 9)
 		} throws: { error in
-			error as? CommandError == .unsupportedAutopilot("Navico (Simrad / B&G)")
+			error as? CommandError == .unsupportedAutopilot("Furuno")
 		}
 	}
 
@@ -120,6 +120,87 @@ struct CommandsTests {
 		if case .nmea2000(_, _, _, let off) = NMEA2000Commands.message(for: .off) {
 			#expect(off.suffix(1) == [0])
 		}
+	}
+
+	@Test func `Navico modes ride the Simnet AP command group`() throws {
+		func bytes(_ command: AutopilotCommand) throws -> [UInt8] {
+			let messages = try NMEA2000Commands.messages(for: command, brand: .navico, destination: 3)
+			guard case .nmea2000(let pgn, let destination, _, let data) = try #require(messages.first)
+			else { throw CommandError.noAutopilot }
+			#expect(pgn == 130850)
+			#expect(destination == 255)  // Simnet commands ride broadcast
+			return data
+		}
+		let prefix: [UInt8] = [0x41, 0x9F, 0x03, 0xFF, 0xFF, 0x0A]
+		#expect(try bytes(.standby) == prefix + [6, 0x00, 0xFF, 0xFF, 0xFF])
+		#expect(try bytes(.engage) == prefix + [9, 0x00, 0xFF, 0xFF, 0xFF])
+		#expect(try bytes(.windVane) == prefix + [15, 0x00, 0xFF, 0xFF, 0xFF])
+		#expect(try bytes(.track) == prefix + [10, 0x00, 0xFF, 0xFF, 0xFF])
+		// A 10° turn to starboard: event 26, direction 3, angle in 1e-4 rad.
+		#expect(try bytes(.adjustHeading(degrees: 10)) == prefix + [26, 0x00, 3, 0xD1, 0x06, 0xFF])
+		#expect {
+			try NMEA2000Commands.messages(for: .lockHeading(degrees: 200), brand: .navico, destination: 3)
+		} throws: { error in
+			error as? CommandError == .unsupportedCommand("lockHeading", dialect: "Navico")
+		}
+	}
+
+	@Test func `Garmin states and steps ride proprietary 126720`() throws {
+		let messages = try NMEA2000Commands.messages(for: .engage, brand: .garmin, destination: 9)
+		guard case .nmea2000(let pgn, let destination, _, let data)? = messages.first else {
+			Issue.record("expected an NMEA 2000 message")
+			return
+		}
+		#expect(pgn == 126720)
+		#expect(destination == 9)
+		#expect(data == [0x0B, 0xE5, 0x98, 0x10, 0x17, 0x04, 0x04, 0x05, 0x0A, 0x00, 0x05, 0x00, 0xFF, 0xFF])
+		// −17° decomposes into one −15 step and two −1 steps.
+		let steps = try NMEA2000Commands.messages(
+			for: .adjustHeading(degrees: -17), brand: .garmin, destination: 9)
+		let codes = steps.compactMap { message -> UInt8? in
+			guard case .nmea2000(_, _, _, let data) = message else { return nil }
+			return data[8]
+		}
+		#expect(codes == [0x01, 0x00, 0x00])
+	}
+
+	@Test func `Seatalk keystroke sentences carry the key and its complement`() throws {
+		func first(_ command: AutopilotCommand) throws -> String {
+			guard case .nmea0183(let body)? = try NMEA2000Commands.seatalkSentences(for: command).first
+			else { throw CommandError.noAutopilot }
+			return body
+		}
+		#expect(try first(.engage) == "STALK,86,11,01,FE")
+		#expect(try first(.standby) == "STALK,86,11,02,FD")
+		#expect(try first(.track) == "STALK,86,11,03,FC")
+		#expect(try first(.windVane) == "STALK,86,11,23,DC")
+		let bodies = try NMEA2000Commands.seatalkSentences(for: .adjustHeading(degrees: 11))
+		#expect(bodies.count == 2)
+		#expect(try first(.adjustHeading(degrees: 11)) == "STALK,86,11,08,F7")
+		// The encoder wraps the body into a checksummed sentence.
+		let lines = OutboundEncoder.lines(.nmea0183(body: "STALK,86,11,01,FE"), format: .nmea0183)
+		#expect(lines?.first?.hasPrefix("$STALK,86,11,01,FE*") == true)
+	}
+
+	@Test func `Signal K orders map to the autopilot API paths`() {
+		#expect(
+			SignalKClient.autopilotPut(for: .engage)
+				== ("steering.autopilot.state", .string("auto")))
+		#expect(
+			SignalKClient.autopilotPut(for: .standby)
+				== ("steering.autopilot.state", .string("standby")))
+		#expect(
+			SignalKClient.autopilotPut(for: .windVane)
+				== ("steering.autopilot.state", .string("wind")))
+		#expect(
+			SignalKClient.autopilotPut(for: .track)
+				== ("steering.autopilot.state", .string("route")))
+		#expect(
+			SignalKClient.autopilotPut(for: .adjustHeading(degrees: -10))
+				== ("steering.autopilot.actions.adjustHeading", .number(-10)))
+		#expect(
+			SignalKClient.autopilotPut(for: .lockHeading(degrees: 235))
+				== ("steering.autopilot.target.headingMagnetic", .number(235)))
 	}
 
 	@Test func `the windlass is located by its declared PGNs`() {

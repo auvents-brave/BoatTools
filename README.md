@@ -166,7 +166,8 @@ frames to the clients and the metric store and let them dispatch.
 - `NMEASession` — a live connection: the inbound `frames` stream plus, on TCP, transmission onto the network. `send(_:)` encodes an `OutboundMessage` in the connection's wire format; `isTransmitCapable` tells whether the connection can speak at all; `devices()` / `device(at:)` expose the connection's own device directory; `interrogateDevices(destination:)` broadcasts the ISO Request roll call.
 - `OutboundMessage` — a protocol-neutral message to transmit (an autopilot command, a windlass order, an ISO request): `.nmea0183(body:)` gains its `$` and checksum, `.nmea2000(pgn:destination:priority:data:)` is encoded per gateway envelope — RAW frames with fast-packet fragmentation, iKonvert `!PDGY`, SeaSmart `$PCDIN`. Receive-only formats (Signal K, Canboat PLAIN, UDP listeners) refuse to transmit.
 - `ConnectionMultiplexer.send(_:toDeviceAt:)` — routes an outbound message in "listen to everything" mode: to the session(s) that heard the target source address when known, otherwise to every transmit-capable session.
-- `NMEA2000Commands` — command builders for the devices a sailor drives. `autopilot(in:)` identifies the pilot (ISO class 40 / function 150) and selects its dialect from the manufacturer code (`AutopilotBrand`); `messages(for:brand:destination:)` encodes an `AutopilotCommand` (standby / engage / wind-vane / track / ±N° / locked heading) — the Raymarine Evolution dialect is implemented (126208 writes of 65379 and 65360, SeaTalk 126720 keystrokes), other brands are named but refused. `message(for:windlassID:destination:)` builds the **standard** windlass order (a 126208 command of PGN 128776) — `WindlassCommand`: up / down / off. `NMEASession.send(_: AutopilotCommand)` / `.send(_: WindlassCommand, windlassID:)` resolve the target device from the session's directory.
+- `NMEA2000Commands` — command builders for the devices a sailor drives. `autopilot(in:)` identifies the pilot (ISO class 40 / function 150) and selects its dialect from the manufacturer code (`AutopilotBrand`); `messages(for:brand:destination:)` encodes an `AutopilotCommand` (standby / engage / wind-vane / track / ±N° / locked heading). Implemented dialects: **Raymarine Evolution** (126208 writes of 65379 and 65360, SeaTalk 126720 keystrokes), **Navico** — Simrad NAC-2/NAC-3, B&G — (Simnet AP command, PGN 130850, canboat layout) and **Garmin Reactor** (proprietary 126720, community reverse-engineering, alpha); Furuno and unknown brands are named but refused. `seatalkSentences(for:)` carries the same orders as Seatalk 1 keystrokes (`$STALK,86,11,…`) for Raymarine pilots behind an NMEA 0183 converter — `NMEASession.send(_: AutopilotCommand)` picks them automatically on an 0183 connection. `message(for:windlassID:destination:)` builds the **standard** windlass order (a 126208 command of PGN 128776) — `WindlassCommand`: up / down / off; NMEA 2000 only (0183 has no windlass sentence, Signal K no standard control path).
+- `SignalKClient.put(path:value:)` / `.autopilot(_:)` — commands through a Signal K server: the `steering.autopilot` PUT paths of the server's autopilot API (state, target heading, adjust), relayed to the pilot by the server's own plugin.
 - `NMEATransportMode`, `NMEAInputFormat` — configuration enums.
 - `NMEA2000DeviceDirectory` / `NMEA2000Device` — inventory of the devices on the NMEA 2000 network, accumulated from the device-information PGNs (60928 address claims, 126996 product information, 126998 configuration information, 126464 PGN lists, 126993 heartbeats): manufacturer, model, serial, versions, class / function, instances, load equivalency, PGN lists, last seen. `interrogationLines(destination:)` yields the ISO Requests (YD RAW transmit format) that make every device announce itself.
 - `ConnectionOwnershipManager` — AppGroup-backed primary / secondary election so several processes (e.g. main app + widget) can share one upstream connection.
@@ -412,10 +413,24 @@ command at the gateway itself.
 ```
 
 The pilot command first broadcasts the ISO Request roll call, waits for the
-autopilot's address claim, then encodes the order in the brand's dialect —
-currently the Raymarine Evolution sequences (mode writes of PGN 65379, locked
-heading via 65360, SeaTalk keystrokes via 126720); other brands are identified
-and reported, but not yet driven. Commands need a transmit-capable TCP gateway.
+autopilot's address claim, then encodes the order in the brand's dialect:
+Raymarine Evolution (mode writes of PGN 65379, locked heading via 65360,
+SeaTalk keystrokes via 126720), Navico NAC-2/NAC-3 & B&G (Simnet AP command,
+PGN 130850) or Garmin Reactor (proprietary 126720, alpha); Furuno and unknown
+brands are identified and reported, but not yet driven.
+
+Two more transports carry the same orders:
+
+```sh
+# Raymarine behind a Seatalk 1 ⇄ NMEA 0183 converter — $STALK keystrokes
+./boattools pilot standby --host 10.0.0.51 --port 10110 --format nmea0183
+
+# Through a Signal K server's autopilot API (server-side plugin required)
+./boattools pilot auto --url http://10.0.0.60:3000 --token XYZ
+```
+
+The windlass order exists on NMEA 2000 only — 0183 defines no windlass
+sentence and Signal K has no standard control path.
 
 ---
 

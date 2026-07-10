@@ -76,6 +76,10 @@ public enum AutopilotCommand: Sendable, Equatable {
 
 /// An order for the anchor windlass — standard NMEA 2000 (a command of
 /// PGN 128776, Windlass Control Status), understood across brands.
+///
+/// NMEA 2000 is the only network carrying a standard windlass order: NMEA
+/// 0183 defines no windlass sentence, and Signal K has no standard control
+/// path for it.
 public enum WindlassCommand: Sendable, Equatable {
 	/// Haul the anchor up.
 	case up
@@ -100,6 +104,9 @@ public enum CommandError: Error, Equatable {
 	/// An autopilot was found, but its command dialect is not implemented;
 	/// carries the brand label.
 	case unsupportedAutopilot(String)
+	/// The dialect exists but cannot express this particular command;
+	/// carries the command and the dialect labels.
+	case unsupportedCommand(String, dialect: String)
 }
 
 // MARK: - NMEA2000Commands
@@ -184,8 +191,39 @@ public enum NMEA2000Commands {
 		switch brand {
 		case .raymarineEvolution:
 			return raymarine(command, destination: destination)
-		case .navico, .garmin, .furuno, .other:
+		case .navico:
+			return try navico(command, address: destination)
+		case .garmin:
+			return try garmin(command, destination: destination)
+		case .furuno, .other:
 			throw CommandError.unsupportedAutopilot(brand.label)
+		}
+	}
+
+	/// The Seatalk 1 keystroke sentences (`$STALK,86,11,…`) for a Raymarine
+	/// pilot reached through an NMEA 0183 converter (ShipModul, Digital
+	/// Yacht, Yacht Devices…) — ``NMEASession/send(_:)-swift.method`` selects
+	/// them automatically on an 0183 connection.
+	///
+	/// - Parameter command: The brand-neutral order.
+	/// - Returns: The sentences to send, in order.
+	/// - Throws: ``CommandError/unsupportedCommand(_:dialect:)`` — Seatalk 1
+	///   keystrokes cannot express an absolute locked heading.
+	public static func seatalkSentences(for command: AutopilotCommand) throws -> [OutboundMessage] {
+		func key(_ code: UInt8) -> OutboundMessage {
+			.nmea0183(body: String(format: "STALK,86,11,%02X,%02X", code, ~code))
+		}
+		switch command {
+		case .engage: return [key(0x01)]
+		case .standby: return [key(0x02)]
+		case .track: return [key(0x03)]
+		case .windVane: return [key(0x23)]
+		case .adjustHeading(let degrees):
+			let (ten, one): (UInt8, UInt8) = degrees < 0 ? (0x06, 0x05) : (0x08, 0x07)
+			return [UInt8](repeating: ten, count: abs(degrees) / 10).map(key)
+				+ [UInt8](repeating: one, count: abs(degrees) % 10).map(key)
+		case .lockHeading:
+			throw CommandError.unsupportedCommand("lockHeading", dialect: "SeaTalk 1")
 		}
 	}
 
@@ -241,6 +279,72 @@ public enum NMEA2000Commands {
 			])
 	}
 
+	// MARK: Navico dialect
+
+	/// Encodes an order for a Navico pilot (Simrad NAC-2/NAC-3, B&G) — the
+	/// Simnet AP command, proprietary PGN 130850 (canboat layout; the same
+	/// sequences the Signal K autopilot plugin drives a NAC-3 with). Mode
+	/// events: 6 standby, 9 heading, 10 nav, 15 wind; course changes are
+	/// event 26 with a direction and a relative angle. The dialect has no
+	/// absolute locked-heading command.
+	private static func navico(_ command: AutopilotCommand, address: UInt8) throws -> [OutboundMessage] {
+		// 130850 carries the pilot's Simnet address in-payload and rides
+		// broadcast on the bus.
+		func event(_ event: UInt8, tail: [UInt8] = [0xFF, 0xFF, 0xFF]) -> OutboundMessage {
+			.nmea2000(
+				pgn: 130850, destination: 255, priority: 3,
+				data: [0x41, 0x9F, address, 0xFF, 0xFF, 0x0A, event, 0x00] + tail)
+		}
+		switch command {
+		case .standby: return [event(6)]
+		case .engage: return [event(9)]
+		case .windVane: return [event(15)]
+		case .track: return [event(10)]
+		case .adjustHeading(let degrees):
+			let radians = Double(abs(degrees)) * .pi / 180
+			let angle = UInt16((radians * 10000).rounded())
+			let direction: UInt8 = degrees < 0 ? 2 : 3  // Simnet: 2 port, 3 starboard
+			return [event(26, tail: [direction, UInt8(angle & 0xFF), UInt8(angle >> 8), 0xFF])]
+		case .lockHeading:
+			throw CommandError.unsupportedCommand("lockHeading", dialect: "Navico")
+		}
+	}
+
+	// MARK: Garmin dialect
+
+	/// Encodes an order for a Garmin Reactor — proprietary PGN 126720
+	/// sequences reverse-engineered by the community (alpha quality, tested
+	/// against a Reactor 40 with a GHC-20). Modes: standby, heading-hold and
+	/// wind; course changes step by ±15° and ±1°. Track engagement and the
+	/// absolute locked heading are not known.
+	private static func garmin(_ command: AutopilotCommand, destination: UInt8) throws -> [OutboundMessage] {
+		func state(_ code: UInt8) -> OutboundMessage {
+			.nmea2000(
+				pgn: 126720, destination: destination, priority: 7,
+				data: [0x0B, 0xE5, 0x98, 0x10, 0x17, 0x04, 0x04, 0x05, 0x0A, 0x00, code, 0x00, 0xFF, 0xFF])
+		}
+		func step(_ code: UInt8) -> OutboundMessage {
+			.nmea2000(
+				pgn: 126720, destination: destination, priority: 7,
+				data: [0x09, 0xE5, 0x98, 0x10, 0x17, 0x04, 0x04, 0x26, code, 0x00, 0xFF, 0xFF, 0xFF, 0xFF])
+		}
+		switch command {
+		case .standby: return [state(0x02)]
+		case .engage: return [state(0x05)]
+		case .windVane: return [state(0x11)]
+		case .track:
+			throw CommandError.unsupportedCommand("track", dialect: "Garmin")
+		case .adjustHeading(let degrees):
+			// The Reactor steps by 15° and 1°: +1 = 0x02, +15 = 0x03,
+			// -1 = 0x00, -15 = 0x01.
+			let (fifteen, one): (UInt8, UInt8) = degrees < 0 ? (0x01, 0x00) : (0x03, 0x02)
+			return [UInt8](repeating: fifteen, count: abs(degrees) / 15).map(step)
+				+ [UInt8](repeating: one, count: abs(degrees) % 15).map(step)
+		case .lockHeading:
+			throw CommandError.unsupportedCommand("lockHeading", dialect: "Garmin")
+		}
+	}
+
 	/// A SeaTalk keystroke (PGN 126720): key code plus its complement, in the
 	/// fixed envelope Evolution pilots expect.
 	private static func raymarineKeystroke(_ key: UInt8, destination: UInt8) -> OutboundMessage {
@@ -269,11 +373,23 @@ extension NMEASession {
 
 	/// Sends an order to the connection's autopilot in its own dialect.
 	///
+	/// On an NMEA 0183 connection the order goes out as Seatalk 1 keystrokes
+	/// (`$STALK`, for Raymarine pilots behind a converter — 0183 has no
+	/// address claims to identify a pilot by). On an NMEA 2000 connection the
+	/// pilot heard on the bus selects the dialect.
+	///
 	/// - Parameter command: The brand-neutral order.
 	/// - Throws: ``CommandError/noAutopilot`` when no pilot was heard,
-	///   ``CommandError/unsupportedAutopilot(_:)`` for a dialect not yet
-	///   implemented, or the ``send(_:)`` transport errors.
+	///   ``CommandError/unsupportedAutopilot(_:)`` /
+	///   ``CommandError/unsupportedCommand(_:dialect:)`` for dialect gaps,
+	///   or the ``send(_:)`` transport errors.
 	public func send(_ command: AutopilotCommand) async throws {
+		if resolvedFormat == .nmea0183 {
+			for message in try NMEA2000Commands.seatalkSentences(for: command) {
+				try await send(message)
+			}
+			return
+		}
 		guard let pilot = autopilot() else { throw CommandError.noAutopilot }
 		for message in try NMEA2000Commands.messages(
 			for: command, brand: pilot.brand, destination: pilot.device.address)

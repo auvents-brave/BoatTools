@@ -218,6 +218,12 @@ public final class NMEASession: @unchecked Sendable {
 		lock.withLock { sender != nil && OutboundEncoder.canTransmit(wireFormat) }
 	}
 
+	/// The connection's wire format — `.auto` until the first received line
+	/// resolves the detection.
+	public var resolvedFormat: NMEAInputFormat {
+		lock.withLock { wireFormat }
+	}
+
 	/// The devices heard on the NMEA 2000 network so far, by source address.
 	public func devices() -> [NMEA2000Device] {
 		lock.withLock { directory.devices }

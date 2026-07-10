@@ -404,6 +404,18 @@ public func boattools_bridge_autopilot(
 	case "heading": command = .lockHeading(degrees: value)
 	default: return failure("unknown action")
 	}
+	// Seatalk 1 converters carry the order as $STALK keystrokes — 0183 has
+	// no address claims, so no pilot identification is possible there.
+	if session.resolvedFormat == .nmea0183 {
+		guard let messages = try? NMEA2000Commands.seatalkSentences(for: command) else {
+			return failure("SeaTalk 1 keystrokes cannot carry this command")
+		}
+		Task {
+			for message in messages { try? await session.send(message) }
+		}
+		return cString(
+			#"{"ok":true,"pilot":{"address":-1,"name":"SeaTalk 1 ($STALK)","brand":"Raymarine SeaTalk"}}"#)
+	}
 	guard let pilot = session.autopilot() else {
 		return failure("no autopilot heard — interrogate first")
 	}

@@ -1089,37 +1089,57 @@ private func renderDeviceInventory(_ devices: [NMEA2000Device]) {
 // MARK: - pilot / windlass (network commands)
 // =============================================================================
 
-/// The endpoint options shared by the command subcommands — TCP only, since
-/// commands must be transmitted onto the bus.
+/// The endpoint options shared by the command subcommands — a TCP gateway
+/// for direct bus transmission, or a Signal K server URL for the autopilot.
 struct CommandEndpointOptions: ParsableArguments {
-	@Option(name: .shortAndLong, help: "Gateway URL — tcp://host:port")
+	@Option(name: .shortAndLong, help: "Gateway or server URL — tcp://host:port, http(s)://server")
 	var url: String?
 
-	@Option(name: .shortAndLong, help: "Gateway host — with --port. Incompatible with --url.")
+	@Option(name: .shortAndLong, help: "Gateway host — with --port: TCP. Incompatible with --url.")
 	var host: String?
 
 	@Option(name: .shortAndLong, help: "Gateway TCP port.")
 	var port: Int?
 
-	@Option(help: "Wire format of the gateway (auto|ydraw|seasmart|ikonvert)")
+	@Option(help: "Wire format of the gateway (auto|nmea0183|ydraw|seasmart|ikonvert)")
 	var format: WireFormat = .auto
 
 	@Option(help: ArgumentHelp("Seconds to wait for the target device to answer", valueName: "sec"))
 	var timeout: Int = 10
 
-	/// Opens the transmit-capable session, or explains why it cannot.
-	func openSession() throws -> NMEASession {
+	@Option(help: "Bearer token (Signal K auth)")
+	var token: String?
+
+	@Option(help: "Username (Signal K auth)")
+	var username: String?
+
+	@Option(help: "Password (Signal K auth)")
+	var password: String?
+
+	fileprivate func resolve() throws -> ConnectCommand.Transport {
 		var probe = ConnectCommand()
 		probe.url = url
 		probe.host = host
 		probe.port = port
 		probe.multicast = nil
-		guard case .tcp(let h, let p) = try probe.resolveTransport() else {
+		return try probe.resolveTransport()
+	}
+
+	/// Opens the transmit-capable session, or explains why it cannot.
+	func openSession() throws -> NMEASession {
+		guard case .tcp(let h, let p) = try resolve() else {
 			throw ValidationError("commands must be transmitted — use a TCP gateway (--host/--port or --url tcp://…)")
 		}
 		return NMEATransport.session(
 			config: NMEATransportConfig(
 				mode: .tcp(host: h, port: p), format: format.transportFormat, decodePGNs: false))
+	}
+
+	/// The Signal K client for an http(s) endpoint, or `nil` for socket modes.
+	func signalKClient() throws -> SignalKClient? {
+		guard case .web(let url) = try resolve() else { return nil }
+		return SignalKClient(
+			config: .init(baseURL: url, token: token, username: username, password: password))
 	}
 }
 
@@ -1158,10 +1178,14 @@ struct PilotCommand: AsyncParsableCommand {
 		commandName: "pilot",
 		abstract: "Send an order to the autopilot",
 		discussion: """
-			Identifies the autopilot on the NMEA 2000 network (ISO class 40,
-			function 150) and speaks its brand's dialect — currently the
-			Raymarine Evolution sequences (mode writes, SeaTalk keystrokes);
-			other brands are reported by name but not yet driven.
+			On an NMEA 2000 gateway (TCP), identifies the autopilot (ISO
+			class 40, function 150) and speaks its brand's dialect —
+			Raymarine Evolution, Navico NAC-2/NAC-3 (Simrad, B&G) and Garmin
+			Reactor (community sequences, alpha); other brands are reported
+			by name. With --format nmea0183 the order goes out as Seatalk 1
+			keystrokes ($STALK) for Raymarine pilots behind a converter. With
+			an http(s) --url, the order rides the Signal K server's autopilot
+			API (requires the server's autopilot plugin).
 
 			Actions:
 			  standby            disengage
@@ -1200,7 +1224,31 @@ struct PilotCommand: AsyncParsableCommand {
 
 	func run() async throws {
 		let command = try parseAction()
+
+		// Signal K server — the autopilot API carries the order.
+		if let client = try endpoint.signalKClient() {
+			do {
+				try await client.autopilot(command)
+				print("Sent via the Signal K autopilot API: \(action)\(degrees.map { " \($0)" } ?? "")")
+			} catch {
+				try? await client.shutdown()
+				throw error
+			}
+			try await client.shutdown()
+			return
+		}
+
 		let session = try endpoint.openSession()
+
+		// A Seatalk 1 converter — keystrokes, no pilot discovery possible.
+		if endpoint.format == .nmea0183 {
+			try await withCommandSession(session) { session in
+				try await session.send(command)
+				print("Sent as Seatalk 1 keystrokes ($STALK): \(action)")
+			}
+			return
+		}
+
 		try await withCommandSession(session) { session in
 			print("Interrogating the network for the autopilot…")
 			guard let pilot = await waitForDevice(seconds: endpoint.timeout, { session.autopilot() })
@@ -1242,6 +1290,15 @@ struct WindlassCLICommand: AsyncParsableCommand {
 		case "down": command = .down
 		case "off", "stop": command = .off
 		default: throw ValidationError("unknown action '\(action)' — expected up, down or off")
+		}
+		if try endpoint.signalKClient() != nil {
+			throw ValidationError(
+				"the windlass order only exists on NMEA 2000 — Signal K has no standard control path; use a TCP gateway"
+			)
+		}
+		guard endpoint.format != .nmea0183 else {
+			throw ValidationError(
+				"the windlass order only exists on NMEA 2000 — NMEA 0183 defines no windlass sentence")
 		}
 		let session = try endpoint.openSession()
 		try await withCommandSession(session) { session in
