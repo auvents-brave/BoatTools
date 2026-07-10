@@ -175,6 +175,8 @@ public final class SignalKClient: Sendable {
 			return ("steering.autopilot.actions.adjustHeading", .number(Double(degrees)))
 		case .lockHeading(let degrees):
 			return ("steering.autopilot.target.headingMagnetic", .number(degrees))
+		case .tack(let toPort):
+			return ("steering.autopilot.actions.tack", .string(toPort ? "port" : "starboard"))
 		}
 	}
 

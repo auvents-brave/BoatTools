@@ -14,6 +14,8 @@ final class SimulatedDevices: @unchecked Sendable {
 		var mode: UInt8 = 0
 		/// Locked heading, degrees magnetic.
 		var target: Double = 0
+		/// Target wind angle in vane mode — signed, negative to port.
+		var windDatum: Double = -40
 	}
 
 	private struct Windlass {
@@ -98,7 +100,9 @@ final class SimulatedDevices: @unchecked Sendable {
 		}
 	}
 
-	/// PGN 126720 SeaTalk keystrokes — the ±1° / ±10° course keys.
+	/// PGN 126720 SeaTalk keystrokes — the ±1° / ±10° course keys and the
+	/// tack chords. In vane mode the keys steer the target wind angle, as a
+	/// real pilot does; otherwise the locked heading.
 	private func handleKeystroke(_ d: [UInt8]) {
 		guard d.count >= 8, d[4] == 0x86 else { return }
 		let step: Double
@@ -107,9 +111,29 @@ final class SimulatedDevices: @unchecked Sendable {
 		case 0x08: step = 10
 		case 0x05: step = -1
 		case 0x06: step = -10
+		case 0x21, 0x22:  // tack chords: −1−10 to port, +1+10 to starboard
+			tack()
+			return
 		default: return
 		}
-		pilot.target = (pilot.target + step + 360).truncatingRemainder(dividingBy: 360)
+		if pilot.mode == 2 {
+			pilot.windDatum = max(-180, min(180, pilot.windDatum + step))
+		} else {
+			pilot.target = (pilot.target + step + 360).truncatingRemainder(dividingBy: 360)
+		}
+	}
+
+	/// Swings through the wind: in vane mode the target wind angle changes
+	/// side; in heading mode the boat turns 100° through the eye.
+	private func tack() {
+		if pilot.mode == 2 {
+			let heading = pilot.target
+			pilot.target = (heading - 2 * pilot.windDatum + 360).truncatingRemainder(dividingBy: 360)
+			pilot.windDatum = -pilot.windDatum
+		} else if pilot.mode == 1 {
+			let turn: Double = pilot.windDatum < 0 ? 100 : -100
+			pilot.target = (pilot.target + turn + 360).truncatingRemainder(dividingBy: 360)
+		}
 	}
 
 	// MARK: Status broadcast
@@ -195,6 +219,20 @@ final class SimulatedDevices: @unchecked Sendable {
 							UInt8(raw & 0xFF), UInt8(raw >> 8),
 							UInt8(raw & 0xFF), UInt8(raw >> 8),
 							0xFF,
+						]
+					))
+			}
+			if pilot.mode == 2 {
+				// The target wind angle, wrapped to 0…360 for the wire.
+				let wrapped = (pilot.windDatum + 360).truncatingRemainder(dividingBy: 360)
+				let raw = UInt16((wrapped * .pi / 180 * 1e4).rounded())
+				frames.append(
+					(
+						65345, pilotAddress,
+						[
+							0x3B, 0x9F,
+							UInt8(raw & 0xFF), UInt8(raw >> 8),
+							0xFF, 0xFF, 0xFF, 0xFF,
 						]
 					))
 			}

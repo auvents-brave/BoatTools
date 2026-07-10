@@ -203,6 +203,31 @@ struct CommandsTests {
 				== ("steering.autopilot.target.headingMagnetic", .number(235)))
 	}
 
+	@Test func `tack rides the key chords, the Simnet event and the Signal K action`() throws {
+		let port = try NMEA2000Commands.messages(
+			for: .tack(toPort: true), brand: .raymarineEvolution, destination: 204)
+		if case .nmea2000(let pgn, _, _, let data)? = port.first {
+			#expect(pgn == 126720)
+			#expect(data[6] == 0x21)
+			#expect(data[7] == 0xDE)
+		} else {
+			Issue.record("expected a keystroke")
+		}
+		let navico = try NMEA2000Commands.messages(for: .tack(toPort: false), brand: .navico, destination: 3)
+		if case .nmea2000(let pgn, _, _, let data)? = navico.first {
+			#expect(pgn == 130850)
+			#expect(data[6] == 17)  // Simnet event: Tack
+		} else {
+			Issue.record("expected a Simnet event")
+		}
+		if case .nmea0183(let body)? = try NMEA2000Commands.seatalkSentences(for: .tack(toPort: false)).first {
+			#expect(body == "STALK,86,11,22,DD")
+		}
+		#expect(
+			SignalKClient.autopilotPut(for: .tack(toPort: true))
+				== ("steering.autopilot.actions.tack", .string("port")))
+	}
+
 	@Test func `Raymarine pilot mode and target heading decode into autopilot metrics`() throws {
 		// 65379: manufacturer field 0x9F3B (1851 + marine), mode 64 = auto.
 		let mode = NMEA2000Decoder.decode(pgn: 65379, data: [0x3B, 0x9F, 64, 0, 0, 0, 0, 0xFF])

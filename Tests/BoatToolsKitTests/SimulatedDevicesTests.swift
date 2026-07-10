@@ -69,6 +69,43 @@ struct SimulatedDevicesTests {
 		#expect(frames.contains { $0.pgn == 65360 } == false)
 	}
 
+	@Test func `in wind mode the keys steer the wind datum and tack flips it`() throws {
+		let devices = SimulatedDevices()
+		_ = devices.statusFrames(heading: 60, dt: 1)
+
+		func send(_ command: AutopilotCommand) throws {
+			for message in try NMEA2000Commands.messages(
+				for: command, brand: .raymarineEvolution, destination: 204)
+			{
+				devices.handle(message)
+			}
+		}
+		func windDatum() throws -> Double {
+			let frames = devices.statusFrames(heading: 60, dt: 1)
+			let frame = try #require(frames.first { $0.pgn == 65345 })
+			var degrees = Double(UInt16(frame.data[2]) | UInt16(frame.data[3]) << 8) * 1e-4 * 180 / .pi
+			if degrees > 180 { degrees -= 360 }
+			return degrees
+		}
+
+		try send(.windVane)
+		#expect(abs(try windDatum() - -40) < 0.1)  // default datum, port side
+
+		// +10 steers the wind datum, not the locked heading.
+		try send(.adjustHeading(degrees: 10))
+		#expect(abs(try windDatum() - -30) < 0.1)
+
+		// The tack chord changes side.
+		try send(.tack(toPort: false))
+		#expect(abs(try windDatum() - 30) < 0.1)
+
+		// Out of wind mode the datum stops broadcasting and keys steer the
+		// locked heading again.
+		try send(.engage)
+		let frames = devices.statusFrames(heading: 60, dt: 1)
+		#expect(frames.contains { $0.pgn == 65345 } == false)
+	}
+
 	@Test func `a windlass order runs the chain until stopped`() throws {
 		let devices = SimulatedDevices()
 		_ = devices.statusFrames(heading: 0, dt: 1)

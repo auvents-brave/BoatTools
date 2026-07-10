@@ -1164,6 +1164,7 @@ internal enum NMEA2000Decoder {
 		case 130311: return envWithHumidity(data)
 		case 130314: return actualPressure(data)
 		case 130323: return meteorologicalStation(data)
+		case 65345: return seatalkWindDatum(data)
 		case 65360: return seatalkTargetHeading(data)
 		case 65379: return seatalkPilotMode(data)
 		default: return nil
@@ -1194,6 +1195,16 @@ internal enum NMEA2000Decoder {
 		default: return nil
 		}
 		return [.init(name: "autopilot.mode", value: mapped, unit: nil)]
+	}
+
+	// 65345 — Seatalk: Pilot Wind Datum (the target wind angle in vane mode)
+	//   bytes 0-1: manufacturer field, bytes 2-3: wind datum (u16, 1e-4 rad)
+	private static func seatalkWindDatum(_ d: [UInt8]) -> [BoatMetric]? {
+		guard isRaymarine(d), let raw = u16(d, 2), !na(raw) else { return nil }
+		var degrees = Double(raw) * 1e-4 * 180 / .pi
+		// Signed, bow-referenced: negative to port, like AWA.
+		if degrees > 180 { degrees -= 360 }
+		return [.init(name: "autopilot.windDatum", value: degrees, unit: "°")]
 	}
 
 	// 65360 — Seatalk: Target Heading (the pilot's locked heading)

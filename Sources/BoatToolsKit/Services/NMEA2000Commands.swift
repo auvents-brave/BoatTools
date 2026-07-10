@@ -68,10 +68,14 @@ public enum AutopilotCommand: Sendable, Equatable {
 	/// Engage in track (route-following) mode.
 	case track
 	/// Alter course by the given signed number of degrees (decomposed into
-	/// the pilot's ±10° / ±1° steps).
+	/// the pilot's ±10° / ±1° steps). In wind-vane mode the pilot applies
+	/// the same keys to its target wind angle.
 	case adjustHeading(degrees: Int)
 	/// Set the locked heading to an absolute magnetic value, in degrees.
 	case lockHeading(degrees: Double)
+	/// Tack through the wind. Raymarine pilots take the direction from the
+	/// key pair; Navico decides from the wind side itself.
+	case tack(toPort: Bool)
 }
 
 /// An order for the anchor windlass — standard NMEA 2000 (a command of
@@ -222,6 +226,8 @@ public enum NMEA2000Commands {
 			let (ten, one): (UInt8, UInt8) = degrees < 0 ? (0x06, 0x05) : (0x08, 0x07)
 			return [UInt8](repeating: ten, count: abs(degrees) / 10).map(key)
 				+ [UInt8](repeating: one, count: abs(degrees) % 10).map(key)
+		case .tack(let toPort):
+			return [key(toPort ? 0x21 : 0x22)]
 		case .lockHeading:
 			throw CommandError.unsupportedCommand("lockHeading", dialect: "SeaTalk 1")
 		}
@@ -247,6 +253,9 @@ public enum NMEA2000Commands {
 			let (ten, one): (UInt8, UInt8) = degrees < 0 ? (0x06, 0x05) : (0x08, 0x07)
 			let keys = [UInt8](repeating: ten, count: tens) + [UInt8](repeating: one, count: ones)
 			return keys.map { raymarineKeystroke($0, destination: destination) }
+		case .tack(let toPort):
+			// The −1−10 / +1+10 key pairs — the pilot's tack chords.
+			return [raymarineKeystroke(toPort ? 0x21 : 0x22, destination: destination)]
 		case .lockHeading(let degrees):
 			// A 126208 write of PGN 65360's target-heading field, in 1e-4 rad.
 			let radians = degrees.truncatingRemainder(dividingBy: 360) * .pi / 180
@@ -305,6 +314,10 @@ public enum NMEA2000Commands {
 			let angle = UInt16((radians * 10000).rounded())
 			let direction: UInt8 = degrees < 0 ? 2 : 3  // Simnet: 2 port, 3 starboard
 			return [event(26, tail: [direction, UInt8(angle & 0xFF), UInt8(angle >> 8), 0xFF])]
+		case .tack:
+			// Simnet event 17 — the pilot picks the direction from the wind
+			// side (the same bytes the Signal K plugin sends a NAC-3).
+			return [event(17, tail: [0x00, 0xFF, 0xFF, 0xFF])]
 		case .lockHeading:
 			throw CommandError.unsupportedCommand("lockHeading", dialect: "Navico")
 		}
@@ -340,6 +353,8 @@ public enum NMEA2000Commands {
 			let (fifteen, one): (UInt8, UInt8) = degrees < 0 ? (0x01, 0x00) : (0x03, 0x02)
 			return [UInt8](repeating: fifteen, count: abs(degrees) / 15).map(step)
 				+ [UInt8](repeating: one, count: abs(degrees) % 15).map(step)
+		case .tack:
+			throw CommandError.unsupportedCommand("tack", dialect: "Garmin")
 		case .lockHeading:
 			throw CommandError.unsupportedCommand("lockHeading", dialect: "Garmin")
 		}

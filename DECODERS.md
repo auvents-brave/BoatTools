@@ -187,6 +187,7 @@ PGNs larger than 8 bytes (fast-packet) are reassembled across multiple CAN frame
 
 | PGN | Name | Metrics emitted |
 |---|---|---|
+| `65345` | Seatalk: Pilot Wind Datum (Raymarine) | `autopilot.windDatum` (target wind angle, signed, negative to port) |
 | `65360` | Seatalk: Target Heading (Raymarine) | `autopilot.target`, `autopilot.target.magnetic` |
 | `65379` | Seatalk: Pilot Mode (Raymarine) | `autopilot.mode` (0 standby, 1 auto, 2 wind, 3 track) |
 
@@ -442,11 +443,11 @@ Signal K requests.
 
 | Pilot | Frames sent |
 |---|---|
-| Raymarine Evolution | PGN `126208` writes of proprietary `65379` (mode: standby, auto, wind, track) and `65360` (locked heading, 1e-4 rad); PGN `126720` SeaTalk keystrokes (±1°, ±10°) |
-| Raymarine Seatalk 1 | `$STALK,86,11,<key>,<~key>` — auto `01`, standby `02`, track `03`, wind `23`, ±1° `07`/`05`, ±10° `08`/`06` |
-| Navico (Simrad NAC-2/NAC-3, B&G) | PGN `130850` Simnet AP command — events: `6` standby, `9` heading, `10` nav, `15` wind, `26` change course (direction `2` port / `3` starboard, angle 1e-4 rad) |
+| Raymarine Evolution | PGN `126208` writes of proprietary `65379` (mode: standby, auto, wind, track) and `65360` (locked heading, 1e-4 rad); PGN `126720` SeaTalk keystrokes (±1°, ±10°, tack chords `21`/`22`) |
+| Raymarine Seatalk 1 | `$STALK,86,11,<key>,<~key>` — auto `01`, standby `02`, track `03`, wind `23`, ±1° `07`/`05`, ±10° `08`/`06`, tack `21`/`22` |
+| Navico (Simrad NAC-2/NAC-3, B&G) | PGN `130850` Simnet AP command — events: `6` standby, `9` heading, `10` nav, `15` wind, `17` tack, `26` change course (direction `2` port / `3` starboard, angle 1e-4 rad) |
 | Garmin Reactor (alpha) | PGN `126720` proprietary — states standby/auto/wind, course steps ±15°/±1° |
-| via Signal K | PUT `steering.autopilot.state` (`auto`, `wind`, `route`, `standby`), `steering.autopilot.target.headingMagnetic`, `steering.autopilot.actions.adjustHeading` |
+| via Signal K | PUT `steering.autopilot.state` (`auto`, `wind`, `route`, `standby`), `steering.autopilot.target.headingMagnetic`, `steering.autopilot.actions.adjustHeading`, `steering.autopilot.actions.tack` |
 | Furuno, others | **not supported** — identified by their address claim and refused by name |
 
 ### Windlass
