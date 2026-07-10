@@ -183,6 +183,13 @@ PGNs larger than 8 bytes (fast-packet) are reassembled across multiple CAN frame
 | `127251` | Rate of Turn | `ROT` |
 | `127257` | Attitude | `yaw`, `pitch`, `roll` |
 
+### Autopilot status
+
+| PGN | Name | Metrics emitted |
+|---|---|---|
+| `65360` | Seatalk: Target Heading (Raymarine) | `autopilot.target`, `autopilot.target.magnetic` |
+| `65379` | Seatalk: Pilot Mode (Raymarine) | `autopilot.mode` (0 standby, 1 auto, 2 wind, 3 track) |
+
 ### Water
 
 | PGN | Name | Metrics emitted |

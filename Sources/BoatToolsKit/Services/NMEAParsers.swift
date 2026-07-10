@@ -1164,8 +1164,54 @@ internal enum NMEA2000Decoder {
 		case 130311: return envWithHumidity(data)
 		case 130314: return actualPressure(data)
 		case 130323: return meteorologicalStation(data)
+		case 65360: return seatalkTargetHeading(data)
+		case 65379: return seatalkPilotMode(data)
 		default: return nil
 		}
+	}
+
+	// MARK: Autopilot status (Raymarine Seatalk NG)
+
+	/// The manufacturer field of a Raymarine proprietary group: 1851 + marine.
+	private static func isRaymarine(_ d: [UInt8]) -> Bool {
+		guard d.count >= 2 else { return false }
+		let field = UInt16(d[0]) | UInt16(d[1]) << 8
+		return field & 0x7FF == 1851 && field >> 13 == 4
+	}
+
+	// 65379 — Seatalk: Pilot Mode (broadcast by Evolution pilots)
+	//   bytes 0-1: manufacturer field, bytes 2-3: pilot mode (u16)
+	//   0 standby · 64 auto · 256 wind vane · 384/385 track
+	// Emitted as `autopilot.mode`: 0 standby, 1 auto, 2 wind, 3 track.
+	private static func seatalkPilotMode(_ d: [UInt8]) -> [BoatMetric]? {
+		guard isRaymarine(d), let mode = u16(d, 2) else { return nil }
+		let mapped: Double
+		switch mode {
+		case 0: mapped = 0
+		case 64: mapped = 1
+		case 256: mapped = 2
+		case 384, 385: mapped = 3
+		default: return nil
+		}
+		return [.init(name: "autopilot.mode", value: mapped, unit: nil)]
+	}
+
+	// 65360 — Seatalk: Target Heading (the pilot's locked heading)
+	//   bytes 0-1: manufacturer field, byte 2: SID,
+	//   bytes 3-4: target true (u16, 1e-4 rad), bytes 5-6: target magnetic
+	private static func seatalkTargetHeading(_ d: [UInt8]) -> [BoatMetric]? {
+		guard isRaymarine(d) else { return nil }
+		var out: [BoatMetric] = []
+		if let raw = u16(d, 3), !na(raw) {
+			out.append(
+				.init(name: "autopilot.target", value: Double(raw) * 1e-4 * 180 / .pi, unit: "°"))
+		}
+		if let raw = u16(d, 5), !na(raw) {
+			out.append(
+				.init(
+					name: "autopilot.target.magnetic", value: Double(raw) * 1e-4 * 180 / .pi, unit: "°"))
+		}
+		return out.isEmpty ? nil : out
 	}
 
 	// MARK: Byte readers

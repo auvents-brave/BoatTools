@@ -203,6 +203,25 @@ struct CommandsTests {
 				== ("steering.autopilot.target.headingMagnetic", .number(235)))
 	}
 
+	@Test func `Raymarine pilot mode and target heading decode into autopilot metrics`() throws {
+		// 65379: manufacturer field 0x9F3B (1851 + marine), mode 64 = auto.
+		let mode = NMEA2000Decoder.decode(pgn: 65379, data: [0x3B, 0x9F, 64, 0, 0, 0, 0, 0xFF])
+		#expect(mode?.first?.name == "autopilot.mode")
+		#expect(mode?.first?.value == 1)
+		// 384 = track → 3; a foreign manufacturer field is ignored.
+		let track = NMEA2000Decoder.decode(pgn: 65379, data: [0x3B, 0x9F, 0x80, 0x01, 0, 0, 0, 0xFF])
+		#expect(track?.first?.value == 3)
+		#expect(NMEA2000Decoder.decode(pgn: 65379, data: [0x41, 0x9F, 64, 0, 0, 0, 0, 0xFF]) == nil)
+
+		// 65360: SID then true/magnetic targets in 1e-4 rad — π/2 each way.
+		let target = try #require(
+			NMEA2000Decoder.decode(pgn: 65360, data: [0x3B, 0x9F, 0, 0x5C, 0x3D, 0x5C, 0x3D, 0xFF]))
+		#expect(target.count == 2)
+		#expect(target[0].name == "autopilot.target")
+		#expect(abs(target[0].value - 90) < 0.01)
+		#expect(target[1].name == "autopilot.target.magnetic")
+	}
+
 	@Test func `the windlass is located by its declared PGNs`() {
 		var directory = NMEA2000DeviceDirectory()
 		directory.apply(
