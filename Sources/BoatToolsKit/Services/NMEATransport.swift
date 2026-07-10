@@ -305,7 +305,8 @@ public final class NMEASession: @unchecked Sendable {
 	}
 
 	func observeDevice(pgn: UInt32, source: UInt8, data: [UInt8]) {
-		lock.withLock { directory.apply(pgn: pgn, source: source, data: data) }
+		// `apply` is discardable, but `withLock` forwards its result as its own.
+		_ = lock.withLock { directory.apply(pgn: pgn, source: source, data: data) }
 	}
 }
 
