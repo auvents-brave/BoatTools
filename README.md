@@ -413,11 +413,7 @@ command at the gateway itself.
 ```
 
 The pilot command first broadcasts the ISO Request roll call, waits for the
-autopilot's address claim, then encodes the order in the brand's dialect:
-Raymarine Evolution (mode writes of PGN 65379, locked heading via 65360,
-SeaTalk keystrokes via 126720), Navico NAC-2/NAC-3 & B&G (Simnet AP command,
-PGN 130850) or Garmin Reactor (proprietary 126720, alpha); Furuno and unknown
-brands are identified and reported, but not yet driven.
+autopilot's address claim, then encodes the order in the brand's dialect.
 
 Two more transports carry the same orders:
 
@@ -429,8 +425,29 @@ Two more transports carry the same orders:
 ./boattools pilot auto --url http://10.0.0.60:3000 --token XYZ
 ```
 
-The windlass order exists on NMEA 2000 only — 0183 defines no windlass
-sentence and Signal K has no standard control path.
+#### Autopilot support matrix
+
+| Pilot | Protocol | Frames | standby / auto / wind | track | ±N° | heading D | Status |
+|---|---|---|---|---|---|---|---|
+| Raymarine Evolution (EV-1/EV-2) | NMEA 2000 | 126208 writes of 65379 / 65360, SeaTalk keystrokes on 126720 | ✓ | ✓ | ✓ | ✓ | community sequences, not yet hardware-validated |
+| Raymarine Seatalk 1 (ST1000+, ST4000+, …) | NMEA 0183 via a Seatalk converter | `$STALK,86,11,…` keystrokes | ✓ | ✓ | ✓ | — | keystroke codes per the Seatalk reference |
+| Navico — Simrad NAC-2/NAC-3, B&G, Lowrance | NMEA 2000 | Simnet AP command, PGN 130850 | ✓ | ✓ | ✓ | — | canboat layout, proven on NAC-3 by the Signal K plugin |
+| Garmin Reactor | NMEA 2000 | proprietary 126720 | ✓ (no track) | — | ✓ (±15°/±1° steps) | — | **alpha** — community reverse-engineering |
+| Any pilot behind a Signal K server | Signal K | PUT `steering.autopilot.*` | ✓ | ✓ | ✓ | ✓ | needs the server's autopilot plugin |
+| **Furuno NavPilot** | — | — | — | — | — | — | **not supported** — no public dialect; identified and refused by name |
+| Other / unknown brands | — | — | — | — | — | — | **not supported** — identified and refused by name |
+
+“—” inside a supported row means the dialect itself cannot express that
+order (the library refuses with the command and dialect names rather than
+sending a guess).
+
+#### Windlass support matrix
+
+| Protocol | Frames | up / down / off | Notes |
+|---|---|---|---|
+| NMEA 2000 | 126208 command of PGN 128776 (direction control) | ✓ | the **standard** order — brand-independent (Lewmar, Maxwell, Quick…), addressed to the windlass heard on the bus or broadcast, `--windlass` selects the unit |
+| NMEA 0183 | — | — | **not supported** — the standard defines no windlass sentence |
+| Signal K | — | — | **not supported** — no standard control path in the specification |
 
 ---
 
