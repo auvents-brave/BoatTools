@@ -380,8 +380,9 @@ public func boattools_bridge_interrogate(_ handle: Int64) -> Int32 {
 
 /// Sends an order to the autopilot heard on the connection, in its brand's
 /// dialect. `action` is one of `standby`, `auto`, `wind`, `track`, `adjust`
-/// (relative degrees in `value`) or `heading` (absolute magnetic degrees in
-/// `value`).
+/// (relative degrees in `value`), `heading` (absolute magnetic degrees in
+/// `value`) or `tack` (to port when `value` is negative — pilots that pick
+/// the side from the wind themselves ignore it).
 /// - Returns: JSON `{"ok",...}` — on success with the pilot's identity
 ///   (`{"ok":true,"pilot":{"address","name","brand"}}`), else with an
 ///   `error` message (cannot transmit, no pilot heard, unknown action, or a
@@ -404,6 +405,7 @@ public func boattools_bridge_autopilot(
 	case "track", "route": command = .track
 	case "adjust": command = .adjustHeading(degrees: Int(value.rounded()))
 	case "heading": command = .lockHeading(degrees: value)
+	case "tack": command = .tack(toPort: value < 0)
 	default: return failure("unknown action")
 	}
 	// Seatalk 1 converters carry the order as $STALK keystrokes — 0183 has
