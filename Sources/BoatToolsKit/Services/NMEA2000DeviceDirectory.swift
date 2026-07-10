@@ -239,10 +239,12 @@ public struct NMEA2000DeviceDirectory: Sendable {
 	/// - Parameter destination: The queried address. Defaults to 255, the
 	///   global address — every device answers.
 	public static func interrogationMessages(destination: UInt8 = 255) -> [OutboundMessage] {
-		[60928 as UInt32, 126996, 126998, 126464].map { pgn in
-			.nmea2000(
-				pgn: 59904, destination: destination, priority: 6,
-				data: [UInt8(pgn & 0xFF), UInt8((pgn >> 8) & 0xFF), UInt8((pgn >> 16) & 0xFF)])
+		let requested: [UInt32] = [60928, 126996, 126998, 126464]
+		return requested.map { pgn -> OutboundMessage in
+			let data: [UInt8] = [
+				UInt8(pgn & 0xFF), UInt8((pgn >> 8) & 0xFF), UInt8((pgn >> 16) & 0xFF),
+			]
+			return .nmea2000(pgn: 59904, destination: destination, priority: 6, data: data)
 		}
 	}
 
