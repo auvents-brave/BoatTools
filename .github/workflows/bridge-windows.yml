@@ -68,19 +68,26 @@ jobs:
           -Xlinker "/LIBPATH:$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows-static-md\lib"
 
       # The bridges link the Swift runtime dynamically: ship its DLLs next to
-      # them so the packaged app needs no Swift installed. The runtime folder
-      # is located by finding swiftCore.dll under the toolchain install.
+      # them so the packaged app needs no Swift installed. The runtime dir is
+      # on PATH (the toolchain setup put it there), so `where.exe` finds
+      # swiftCore.dll wherever the installer chose to live.
       - name: Assemble bridges + Swift runtime
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path stage | Out-Null
           Copy-Item Stheno\Bridge\.build\release\SthenoBridge.dll stage\
           Copy-Item BoatTools\Bridge\.build\release\BoatToolsBridge.dll stage\
-          $core = Get-ChildItem -Path "$env:ProgramFiles\Swift" -Recurse -Filter swiftCore.dll |
-            Select-Object -First 1
-          if (-not $core) { Write-Error "swiftCore.dll not found under $env:ProgramFiles\Swift"; exit 1 }
-          Write-Host "Swift runtime: $($core.DirectoryName)"
-          Copy-Item "$($core.DirectoryName)\*.dll" stage\ -Force
+          $core = (where.exe swiftCore.dll 2>$null | Select-Object -First 1)
+          if (-not $core) {
+            $core = @("$env:LOCALAPPDATA\Programs\Swift", "$env:ProgramFiles\Swift", "$env:SystemDrive\Library") |
+              Where-Object { Test-Path $_ } |
+              ForEach-Object { Get-ChildItem -Path $_ -Recurse -Filter swiftCore.dll -ErrorAction SilentlyContinue } |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $core) { Write-Error "swiftCore.dll not found (PATH, LocalAppData, ProgramFiles)"; exit 1 }
+          $runtime = Split-Path $core
+          Write-Host "Swift runtime: $runtime"
+          Copy-Item "$runtime\*.dll" stage\ -Force
           Get-ChildItem stage | Format-Table Name, Length
 
       - name: Upload bridges artifact
