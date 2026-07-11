@@ -31,6 +31,10 @@ jobs:
             platform: linux
             arch: x86_64
             swift-flags: ""
+          - runner: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+            swift-flags: ""
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
@@ -147,7 +151,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ASSET="boattools-linux-x86_64.tar.gz"
+          ASSET="boattools-linux-${{ matrix.arch }}.tar.gz"
           tar czf "$ASSET" -C "$BINDIR" boattools
           shasum -a 256 "$ASSET" > "$ASSET.sha256"
 
@@ -160,16 +164,16 @@ jobs:
             boattools-macos-universal.pkg.sha256
             boattools-linux-x86_64.tar.gz
             boattools-linux-x86_64.tar.gz.sha256
+            boattools-linux-arm64.tar.gz
+            boattools-linux-arm64.tar.gz.sha256
 
-  # Windows is a development-only artefact: it ships with the rolling "latest"
-  # lab build, never with a tagged release (which stays macOS + Linux). libcurl
-  # and zlib are linked statically (vcpkg static-md triplet), but — like the
-  # Linux build — the Swift runtime is a dependency, not bundled: the target
-  # installs the Swift runtime plus the Visual C++ redistributable (see the
-  # README "Runtime requirements" section).
+  # Builds on every push and every tagged release alike, same as macOS and
+  # Linux. libcurl and zlib are linked statically (vcpkg static-md triplet),
+  # but — like the Linux build — the Swift runtime is a dependency, not
+  # bundled: the target installs the Swift runtime plus the Visual C++
+  # redistributable (see the README "Runtime requirements" section).
   build-windows:
     name: Build (windows)
-    if: github.ref_type != 'tag'
     permissions:
       contents: read
     runs-on: windows-2022
