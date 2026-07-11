@@ -117,6 +117,69 @@ public final class SignalKClient: Sendable {
 		return try JSONValue.parse(Data(response.body))
 	}
 
+	// MARK: Commands (PUT)
+
+	/// Sends a Signal K PUT request — the server's provider plugins relay it
+	/// to the device (e.g. an autopilot plugin speaking the pilot's own
+	/// protocol on the server's NMEA 2000 interface).
+	///
+	/// - Parameters:
+	///   - path: The dotted Signal K path, e.g. `steering.autopilot.state`.
+	///   - value: The value to put.
+	/// - Throws: ``BoatCloudError`` on network or HTTP errors.
+	/// The `{"value": …}` envelope a Signal K PUT carries.
+	private struct PutBody<V: Encodable>: Encodable {
+		let value: V
+	}
+
+	public func put(path: String, value: some Encodable & Sendable) async throws {
+		let segments = path.split(separator: ".").joined(separator: "/")
+		let url = Self.trimmedBase(config.baseURL) + "/signalk/v1/api/vessels/self/" + segments
+		let request = HTTPRequest(
+			method: "PUT",
+			url: url,
+			headers: (await authHeaders()) + [(name: "Content-Type", value: "application/json")],
+			body: [UInt8](try JSONEncoder().encode(PutBody(value: value))))
+		let response = try await http.execute(request)
+		guard (200..<300).contains(response.status) else {
+			throw BoatCloudError.http(
+				status: response.status, body: String(bytes: response.body, encoding: .utf8))
+		}
+	}
+
+	/// Sends an autopilot order through the Signal K server's autopilot API
+	/// (the `steering.autopilot` PUT paths served by the server's autopilot
+	/// plugin, which speaks the pilot's own protocol).
+	///
+	/// - Parameter command: The brand-neutral order.
+	/// - Throws: ``BoatCloudError`` on network or HTTP errors — including the
+	///   server's refusal when no autopilot plugin handles the path.
+	public func autopilot(_ command: AutopilotCommand) async throws {
+		let (path, value) = Self.autopilotPut(for: command)
+		switch value {
+		case .string(let string): try await put(path: path, value: string)
+		case .number(let number): try await put(path: path, value: number)
+		default: break
+		}
+	}
+
+	/// The Signal K PUT carrying an autopilot order — the path and value of
+	/// the server's autopilot API.
+	static func autopilotPut(for command: AutopilotCommand) -> (path: String, value: JSONValue) {
+		switch command {
+		case .standby: return ("steering.autopilot.state", .string("standby"))
+		case .engage: return ("steering.autopilot.state", .string("auto"))
+		case .windVane: return ("steering.autopilot.state", .string("wind"))
+		case .track: return ("steering.autopilot.state", .string("route"))
+		case .adjustHeading(let degrees):
+			return ("steering.autopilot.actions.adjustHeading", .number(Double(degrees)))
+		case .lockHeading(let degrees):
+			return ("steering.autopilot.target.headingMagnetic", .number(degrees))
+		case .tack(let toPort):
+			return ("steering.autopilot.actions.tack", .string(toPort ? "port" : "starboard"))
+		}
+	}
+
 	// MARK: WebSocket live stream
 
 	/// Opens a Signal K live WebSocket stream, managing the underlying client

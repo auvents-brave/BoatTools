@@ -573,6 +573,9 @@ struct BoatToolsCLI: AsyncParsableCommand {
 		version: ToolVersion.current,
 		subcommands: [
 			ConnectCommand.self,
+			DevicesCommand.self,
+			PilotCommand.self,
+			WindlassCLICommand.self,
 			FileCommand.self,
 			VRMCommand.self,
 			DiscoverCommand.self,
@@ -747,7 +750,7 @@ struct ConnectCommand: AsyncParsableCommand {
 		return .udpBroadcast(port: p)
 	}
 
-	private static func parseURL(_ raw: String) throws -> Transport {
+	fileprivate static func parseURL(_ raw: String) throws -> Transport {
 		let lower = raw.lowercased()
 		if lower.hasPrefix("tcp://") {
 			guard let comps = URLComponents(string: raw),
@@ -888,6 +891,429 @@ struct ConnectCommand: AsyncParsableCommand {
 		}
 
 		try await client.shutdown()
+	}
+}
+
+// =============================================================================
+// MARK: - devices
+// =============================================================================
+
+struct DevicesCommand: AsyncParsableCommand {
+	static let configuration = CommandConfiguration(
+		commandName: "devices",
+		abstract: "Inventory the devices present on the NMEA 2000 network",
+		discussion: """
+			Listens to the stream, collects the device-information PGNs — 60928
+			address claims, 126996 product information, 126998 configuration
+			information, 126464 PGN lists, 126993 heartbeats — and prints one
+			detailed block per device heard.
+
+			On a TCP RAW gateway (Yacht Devices and compatible) an ISO Request
+			is first broadcast so every device announces itself; use
+			--no-request to stay purely passive. Signal K web sources do not
+			relay these PGNs — point the command at the gateway itself.
+			"""
+	)
+
+	@Option(
+		name: .shortAndLong,
+		help: "Universal endpoint URL (tcp://host:port, udp://:port, udp://group:port)")
+	var url: String?
+
+	@Option(name: .shortAndLong, help: "Host — with --port: TCP. Incompatible with --url.")
+	var host: String?
+
+	@Option(
+		name: .shortAndLong,
+		help: "Port — alone: UDP broadcast; +--host: TCP; +--multicast: UDP multicast.")
+	var port: Int?
+
+	@Option(help: "Multicast group address — requires --port. Incompatible with --url.")
+	var multicast: String?
+
+	@Option(help: "Wire format for the stream (auto|ydraw|seasmart|canboat|ikonvert)")
+	var format: WireFormat = .auto
+
+	@Option(
+		name: .shortAndLong,
+		help: ArgumentHelp("Collection window in seconds (0 = until the stream ends)", valueName: "sec"))
+	var duration: Int = 15
+
+	@Flag(
+		inversion: .prefixedNo,
+		help: "Broadcast an ISO Request on TCP gateways so devices announce themselves")
+	var request: Bool = true
+
+	func run() async throws {
+		// Reuse the connect command's addressing resolution.
+		var probe = ConnectCommand()
+		probe.url = url
+		probe.host = host
+		probe.port = port
+		probe.multicast = multicast
+		let transport = try probe.resolveTransport()
+
+		let config: NMEATransportConfig
+		switch transport {
+		case .web:
+			throw ValidationError(
+				"devices needs an NMEA 2000 stream (TCP or UDP) — Signal K web sources do not carry the device PGNs")
+		case .tcp(let h, let p):
+			config = NMEATransportConfig(
+				mode: .tcp(host: h, port: p), format: format.transportFormat, decodePGNs: false)
+		case .udpBroadcast(let p):
+			config = NMEATransportConfig(
+				mode: .udp(listenPort: p, multicastGroup: nil),
+				format: format.transportFormat, decodePGNs: false)
+		case .udpMulticast(let p, let group):
+			config = NMEATransportConfig(
+				mode: .udp(listenPort: p, multicastGroup: group),
+				format: format.transportFormat, decodePGNs: false)
+		}
+
+		print("Listening for device-information PGNs\(duration > 0 ? " for \(duration) s" : "")…")
+
+		let session = NMEATransport.session(config: config)
+		if request { Self.interrogate(session) }
+
+		let consumer = Task {
+			var directory = NMEA2000DeviceDirectory()
+			do {
+				for try await frame in session.frames {
+					try Task.checkCancellation()
+					guard case .nmea2000(let pgn, let source, _, let data) = frame else { continue }
+					let known = directory[source] != nil
+					if directory.apply(pgn: pgn, source: source, data: data), !known,
+						let device = directory[source]
+					{
+						print("  ⚓︎ heard @\(String(format: "%03d", source)) — \(device.displayName)")
+					}
+				}
+			} catch is CancellationError {
+			} catch {
+				FileHandle.standardError.write(Data("⚠ \(error)\n".utf8))
+			}
+			return directory
+		}
+		if duration > 0 {
+			try? await Task.sleep(for: .seconds(duration))
+			consumer.cancel()
+		}
+		let directory = await consumer.value
+		renderDeviceInventory(directory.devices)
+	}
+
+	/// Broadcasts the ISO Request roll call on the session itself — the
+	/// answers arrive on the same stream. Failures are silent: the command
+	/// still collects whatever the bus broadcasts spontaneously (UDP sources
+	/// are receive-only, and auto-detection needs a first line before the
+	/// session can encode).
+	private static func interrogate(_ session: NMEASession) {
+		Task {
+			// Let the connection settle and the wire format resolve first.
+			try? await Task.sleep(for: .seconds(1))
+			try? await session.interrogateDevices()
+		}
+	}
+}
+
+/// Pretty-prints the collected device inventory, one block per device with
+/// every piece of information the bus provided.
+private func renderDeviceInventory(_ devices: [NMEA2000Device]) {
+	guard devices.isEmpty == false else {
+		print("\nNo devices heard — the source may not carry NMEA 2000 device PGNs.")
+		return
+	}
+
+	print("\n— \(devices.count) device\(devices.count > 1 ? "s" : "") on the network —")
+	for device in devices {
+		var header = device.displayName
+		if let maker = device.manufacturerName, maker != header { header += " — \(maker)" }
+		print("\n━━ @\(String(format: "%03d", device.address))  \(header) ━━")
+
+		var rows: [(String, String)] = []
+		if let deviceClass = device.deviceClassName {
+			let function = device.deviceFunctionName.map { " · \($0)" } ?? ""
+			rows.append(("kind", deviceClass + function))
+		}
+		if let group = device.industryGroupName, group != "Marine" {
+			rows.append(("industry", group))
+		}
+		if device.deviceInstance != nil || device.systemInstance != nil {
+			let device_ = device.deviceInstance.map { "device \($0)" }
+			let system = device.systemInstance.map { "system \($0)" }
+			rows.append(("instances", [device_, system].compactMap { $0 }.joined(separator: " · ")))
+		}
+		if let unique = device.uniqueNumber { rows.append(("unique number", "\(unique)")) }
+		if let name = device.name {
+			var value = String(format: "0x%016llX", name)
+			if let capable = device.arbitraryAddressCapable, capable {
+				value += " · self-addressing"
+			}
+			rows.append(("NAME", value))
+		}
+		if let code = device.productCode { rows.append(("product code", "\(code)")) }
+		if let version = device.nmea2000Version {
+			rows.append(("NMEA 2000", String(format: "%.3f", version)))
+		}
+		if let level = device.certificationLevel { rows.append(("certification", "level \(level)")) }
+		if let len = device.loadEquivalency {
+			rows.append(("load", "LEN \(len) (\(Int(len) * 50) mA)"))
+		}
+		if let model = device.modelVersion { rows.append(("model version", model)) }
+		if let software = device.softwareVersion { rows.append(("software", software)) }
+		if let serial = device.serialNumber { rows.append(("serial", serial)) }
+		if let note = device.installationDescription1 { rows.append(("installation", note)) }
+		if let note = device.installationDescription2 { rows.append(("installation 2", note)) }
+		if let info = device.manufacturerInformation { rows.append(("manufacturer", info)) }
+		if let pgns = device.transmittedPGNs {
+			rows.append(("transmits", pgns.map(String.init).joined(separator: ", ")))
+		}
+		if let pgns = device.receivedPGNs {
+			rows.append(("receives", pgns.map(String.init).joined(separator: ", ")))
+		}
+		if let interval = device.heartbeatInterval {
+			rows.append(("heartbeat", String(format: "every %.1f s", interval)))
+		}
+		rows.append(("last seen", device.lastSeen.formatted(date: .omitted, time: .standard)))
+
+		let width = rows.map(\.0.count).max() ?? 0
+		for (label, value) in rows {
+			let pad = String(repeating: " ", count: width - label.count)
+			print("  \(label)\(pad)  \(value)")
+		}
+	}
+}
+
+// =============================================================================
+// MARK: - pilot / windlass (network commands)
+// =============================================================================
+
+/// The endpoint options shared by the command subcommands — a TCP gateway
+/// for direct bus transmission, or a Signal K server URL for the autopilot.
+struct CommandEndpointOptions: ParsableArguments {
+	@Option(name: .shortAndLong, help: "Gateway or server URL — tcp://host:port, http(s)://server")
+	var url: String?
+
+	@Option(name: .shortAndLong, help: "Gateway host — with --port: TCP. Incompatible with --url.")
+	var host: String?
+
+	@Option(name: .shortAndLong, help: "Gateway TCP port.")
+	var port: Int?
+
+	@Option(help: "Wire format of the gateway (auto|nmea0183|ydraw|seasmart|ikonvert)")
+	var format: WireFormat = .auto
+
+	@Option(help: ArgumentHelp("Seconds to wait for the target device to answer", valueName: "sec"))
+	var timeout: Int = 10
+
+	@Option(help: "Bearer token (Signal K auth)")
+	var token: String?
+
+	@Option(help: "Username (Signal K auth)")
+	var username: String?
+
+	@Option(help: "Password (Signal K auth)")
+	var password: String?
+
+	fileprivate func resolve() throws -> ConnectCommand.Transport {
+		var probe = ConnectCommand()
+		probe.url = url
+		probe.host = host
+		probe.port = port
+		probe.multicast = nil
+		return try probe.resolveTransport()
+	}
+
+	/// Opens the transmit-capable session, or explains why it cannot.
+	func openSession() throws -> NMEASession {
+		guard case .tcp(let h, let p) = try resolve() else {
+			throw ValidationError("commands must be transmitted — use a TCP gateway (--host/--port or --url tcp://…)")
+		}
+		return NMEATransport.session(
+			config: NMEATransportConfig(
+				mode: .tcp(host: h, port: p), format: format.transportFormat, decodePGNs: false))
+	}
+
+	/// The Signal K client for an http(s) endpoint, or `nil` for socket modes.
+	func signalKClient() throws -> SignalKClient? {
+		guard case .web(let url) = try resolve() else { return nil }
+		return SignalKClient(
+			config: .init(baseURL: url, token: token, username: username, password: password))
+	}
+}
+
+/// Drives a command session: consumes the frames (device claims, format
+/// detection), broadcasts the roll call, runs `body`, tears down.
+private func withCommandSession(
+	_ session: NMEASession, body: (NMEASession) async throws -> Void
+) async rethrows {
+	let consumer = Task {
+		do {
+			for try await _ in session.frames { try Task.checkCancellation() }
+		} catch {}
+	}
+	defer { consumer.cancel() }
+	// Let the connection settle and the wire format resolve, then make the
+	// devices announce themselves.
+	try? await Task.sleep(for: .seconds(1))
+	try? await session.interrogateDevices()
+	try await body(session)
+	// Leave the gateway time to flush the last command onto the bus.
+	try? await Task.sleep(for: .milliseconds(700))
+}
+
+/// Polls `find` every half second until it returns a value or the timeout
+/// elapses.
+private func waitForDevice<T>(seconds: Int, _ find: () -> T?) async -> T? {
+	for _ in 0..<(seconds * 2) {
+		if let found = find() { return found }
+		try? await Task.sleep(for: .milliseconds(500))
+	}
+	return find()
+}
+
+struct PilotCommand: AsyncParsableCommand {
+	static let configuration = CommandConfiguration(
+		commandName: "pilot",
+		abstract: "Send an order to the autopilot",
+		discussion: """
+			On an NMEA 2000 gateway (TCP), identifies the autopilot (ISO
+			class 40, function 150) and speaks its brand's dialect —
+			Raymarine Evolution, Navico NAC-2/NAC-3 (Simrad, B&G) and Garmin
+			Reactor (community sequences, alpha); other brands are reported
+			by name. With --format nmea0183 the order goes out as Seatalk 1
+			keystrokes ($STALK) for Raymarine pilots behind a converter. With
+			an http(s) --url, the order rides the Signal K server's autopilot
+			API (requires the server's autopilot plugin).
+
+			Actions:
+			  standby            disengage
+			  auto               engage, heading-hold mode
+			  wind               engage, wind-vane mode
+			  track              engage, track mode
+			  +N / -N            alter course by N degrees (e.g. +10, -1)
+			  heading D          set the locked heading to D degrees magnetic
+			"""
+	)
+
+	@OptionGroup var endpoint: CommandEndpointOptions
+
+	@Argument(help: "standby | auto | wind | track | +N | -N | heading")
+	var action: String
+
+	@Argument(help: "Degrees, for the heading action")
+	var degrees: Double?
+
+	private func parseAction() throws -> AutopilotCommand {
+		switch action.lowercased() {
+		case "standby": return .standby
+		case "auto", "engage": return .engage
+		case "wind": return .windVane
+		case "track", "route": return .track
+		case "heading":
+			guard let degrees else {
+				throw ValidationError("heading needs a value in degrees — e.g. pilot heading 235")
+			}
+			return .lockHeading(degrees: degrees)
+		default:
+			if let step = Int(action), step != 0 { return .adjustHeading(degrees: step) }
+			throw ValidationError("unknown action '\(action)'")
+		}
+	}
+
+	func run() async throws {
+		let command = try parseAction()
+
+		// Signal K server — the autopilot API carries the order.
+		if let client = try endpoint.signalKClient() {
+			do {
+				try await client.autopilot(command)
+				print("Sent via the Signal K autopilot API: \(action)\(degrees.map { " \($0)" } ?? "")")
+			} catch {
+				try? await client.shutdown()
+				throw error
+			}
+			try await client.shutdown()
+			return
+		}
+
+		let session = try endpoint.openSession()
+
+		// A Seatalk 1 converter — keystrokes, no pilot discovery possible.
+		if endpoint.format == .nmea0183 {
+			try await withCommandSession(session) { session in
+				try await session.send(command)
+				print("Sent as Seatalk 1 keystrokes ($STALK): \(action)")
+			}
+			return
+		}
+
+		try await withCommandSession(session) { session in
+			print("Interrogating the network for the autopilot…")
+			guard let pilot = await waitForDevice(seconds: endpoint.timeout, { session.autopilot() })
+			else {
+				throw ValidationError(
+					"no autopilot heard on the network — devices seen: "
+						+ (session.devices().map(\.displayName).joined(separator: ", ").nonEmpty ?? "none"))
+			}
+			print("Autopilot @\(pilot.device.address) — \(pilot.device.displayName) (\(pilot.brand.label))")
+			try await session.send(command)
+			print("Sent: \(action)\(degrees.map { " \($0)" } ?? "")")
+		}
+	}
+}
+
+struct WindlassCLICommand: AsyncParsableCommand {
+	static let configuration = CommandConfiguration(
+		commandName: "windlass",
+		abstract: "Drive the anchor windlass",
+		discussion: """
+			Sends the standard NMEA 2000 windlass order (a command of PGN
+			128776) — addressed to the windlass heard on the network, or
+			broadcast when none identified itself.
+			"""
+	)
+
+	@OptionGroup var endpoint: CommandEndpointOptions
+
+	@Argument(help: "up | down | off")
+	var action: String
+
+	@Option(help: "Windlass identifier, on installations with more than one")
+	var windlass: Int = 0
+
+	func run() async throws {
+		let command: WindlassCommand
+		switch action.lowercased() {
+		case "up": command = .up
+		case "down": command = .down
+		case "off", "stop": command = .off
+		default: throw ValidationError("unknown action '\(action)' — expected up, down or off")
+		}
+		if try endpoint.signalKClient() != nil {
+			throw ValidationError(
+				"the windlass order only exists on NMEA 2000 — Signal K has no standard control path; use a TCP gateway"
+			)
+		}
+		guard endpoint.format != .nmea0183 else {
+			throw ValidationError(
+				"the windlass order only exists on NMEA 2000 — NMEA 0183 defines no windlass sentence")
+		}
+		let session = try endpoint.openSession()
+		try await withCommandSession(session) { session in
+			// The windlass is optional — the ID field addresses it anyway.
+			let device = await waitForDevice(seconds: min(endpoint.timeout, 5)) {
+				NMEA2000Commands.windlass(in: session.devices())
+			}
+			if let device {
+				print("Windlass @\(device.address) — \(device.displayName)")
+			} else {
+				print("No windlass identified — broadcasting.")
+			}
+			try await session.send(command, windlassID: UInt8(clamping: windlass))
+			print("Sent: \(action)")
+		}
 	}
 }
 

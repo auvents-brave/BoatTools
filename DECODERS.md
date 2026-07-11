@@ -183,6 +183,14 @@ PGNs larger than 8 bytes (fast-packet) are reassembled across multiple CAN frame
 | `127251` | Rate of Turn | `ROT` |
 | `127257` | Attitude | `yaw`, `pitch`, `roll` |
 
+### Autopilot status
+
+| PGN | Name | Metrics emitted |
+|---|---|---|
+| `65345` | Seatalk: Pilot Wind Datum (Raymarine) | `autopilot.windDatum` (target wind angle, signed, negative to port) |
+| `65360` | Seatalk: Target Heading (Raymarine) | `autopilot.target`, `autopilot.target.magnetic` |
+| `65379` | Seatalk: Pilot Mode (Raymarine) | `autopilot.mode` (0 standby, 1 auto, 2 wind, 3 track) |
+
 ### Water
 
 | PGN | Name | Metrics emitted |
@@ -236,6 +244,21 @@ PGNs larger than 8 bytes (fast-packet) are reassembled across multiple CAN frame
 | `129794` | AIS Class A Static and Voyage Data | 5 |
 | `129809` | AIS Class B "CS" Static Data, Part A | 24A |
 | `129810` | AIS Class B "CS" Static Data, Part B | 24B |
+
+### Network device information
+
+Decoded into `NMEA2000Device` records by `NMEA2000DeviceDirectory` (one per
+source address) rather than into metrics — surfaced by `boattools devices`
+and `boattools_bridge_devices`.
+
+| PGN | Name | Decoded fields |
+|---|---|---|
+| `59904` | ISO Request | *emitted* by `interrogationLines(destination:)` to trigger a network roll call — requests 60928, 126996, 126998 and 126464 |
+| `60928` | ISO Address Claim | the 64-bit NAME: unique number, manufacturer code (with registered-name lookup), device instance, device function and class (with ISO label lookup), system instance, industry group, arbitrary-address capability |
+| `126464` | PGN List | transmitted PGNs / received PGNs (split by the function byte) |
+| `126993` | Heartbeat | update interval; refreshes the device's last-seen date |
+| `126996` | Product Information | NMEA 2000 database version, product code, model ID, software version, model version, serial code, certification level, load equivalency (LEN) |
+| `126998` | Configuration Information | installation descriptions 1 and 2, manufacturer information (variable-length strings) |
 
 ---
 
@@ -399,3 +422,36 @@ Reverse view: for every canonical metric emitted by BoatTools, the protocols tha
 | `utc.timestamp` | `ZDA` | `126992`, `129033` | `navigation.datetime` |
 | `pjk.northing` / `pjk.easting` | `$PTNL,PJK` | — | — |
 | AIS target | `VDM`, `VDO` | `129038/039/040/041/793/794/798/809/810` | — |
+
+---
+
+## Transmitted frames (outbound)
+
+The frames BoatTools **sends** onto the network — the mirror of the decoder
+tables above. `NMEASession.send(_:)` encodes them in the connection's wire
+format (RAW frames fast-packet fragmented, iKonvert `!PDGY`, SeaSmart
+`$PCDIN`, 0183 checksummed); `SignalKClient.put(path:value:)` carries the
+Signal K requests.
+
+### Device information
+
+| Frame | Purpose |
+|---|---|
+| PGN `59904` ISO Request | the roll call — asks 60928 / 126996 / 126998 / 126464 so every device announces itself |
+
+### Autopilot
+
+| Pilot | Frames sent |
+|---|---|
+| Raymarine Evolution | PGN `126208` writes of proprietary `65379` (mode: standby, auto, wind, track; mode `FFFF` + sub-mode `4` = tack, from the Axiom's recipe) and `65360` (locked heading, 1e-4 rad); PGN `126720` SeaTalk keystrokes (±1°, ±10°) |
+| Raymarine Seatalk 1 | `$STALK,86,11,<key>,<~key>` — auto `01`, standby `02`, track `03`, wind `23`, ±1° `07`/`05`, ±10° `08`/`06`, tack `21`/`22` |
+| Navico (Simrad NAC-2/NAC-3, B&G) | PGN `130850` Simnet AP command — events: `6` standby, `9` heading, `10` nav, `15` wind, `17` tack, `26` change course (direction `2` port / `3` starboard, angle 1e-4 rad) |
+| Garmin Reactor (alpha) | PGN `126720` proprietary — states standby/auto/wind, course steps ±15°/±1° |
+| via Signal K | PUT `steering.autopilot.state` (`auto`, `wind`, `route`, `standby`), `steering.autopilot.target.headingMagnetic`, `steering.autopilot.actions.adjustHeading`, `steering.autopilot.actions.tack` |
+| Furuno, others | **not supported** — identified by their address claim and refused by name |
+
+### Windlass
+
+| Frame | Purpose |
+|---|---|
+| PGN `126208` command of `128776` | the **standard** windlass order — field 2 windlass ID, field 3 direction control (`0` off, `1` down, `2` up). NMEA 2000 only: 0183 defines no windlass sentence, Signal K no standard control path |

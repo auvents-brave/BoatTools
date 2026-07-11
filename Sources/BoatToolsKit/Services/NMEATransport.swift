@@ -122,6 +122,192 @@ public struct NMEATransport: Sendable {
 			continuation.onTermination = { _ in task.cancel() }
 		}
 	}
+
+	/// Opens a connection and returns a full session — the frame stream plus,
+	/// on transports that support it, the outbound path onto the network.
+	///
+	/// - Parameter config: The transport configuration.
+	/// - Returns: The live session; consume ``NMEASession/frames`` exactly
+	///   like ``frameStream(config:)``.
+	public static func session(config: NMEATransportConfig) -> NMEASession {
+		let session = NMEASession(format: config.format)
+		session.frames = AsyncThrowingStream { continuation in
+			// The task only holds the session weakly: the session owns the
+			// stream, so a strong capture would keep the pair alive for ever.
+			let task = Task { [weak session] in
+				let aggregator = LineAggregator()
+				let dispatcher = FrameDispatcher(
+					config: config,
+					emit: { [weak session] frame in
+						if case .nmea2000(let pgn, let source, _, let data) = frame {
+							session?.observeDevice(pgn: pgn, source: source, data: data)
+						}
+						continuation.yield(frame)
+					},
+					onFormatResolved: { [weak session] format in session?.resolveFormat(format) }
+				)
+				do {
+					switch config.mode {
+					case .tcp(let host, let port):
+						let connection = try await NetworkStack.tcp.connect(host: host, port: port)
+						session?.attachSender { text in
+							try await connection.send(Array(text.utf8))
+						}
+						// Dropping `incoming` on exit (return, throw or
+						// cancellation) closes the socket.
+						for try await chunk in connection.incoming {
+							aggregator.ingest(chunk) { dispatcher.process($0) }
+						}
+					case .udp(let port, let multicastGroup):
+						// Receive-only — the session has no sender.
+						let chunks = try await NetworkStack.udp.listen(
+							port: port, multicastGroup: multicastGroup)
+						for try await chunk in chunks {
+							aggregator.ingest(chunk) { dispatcher.process($0) }
+						}
+					}
+					continuation.finish()
+				} catch is CancellationError {
+					continuation.finish()
+				} catch {
+					continuation.finish(throwing: BoatCloudError.transport("\(error)"))
+				}
+			}
+			continuation.onTermination = { _ in task.cancel() }
+		}
+		return session
+	}
+}
+
+// MARK: - NMEASession
+
+/// A live NMEA connection: the inbound frame stream plus, on transports that
+/// support it, an outbound path onto the boat's network.
+///
+/// ``frames`` behaves exactly like ``NMEATransport/frameStream(config:)``. On
+/// a TCP connection the session can also transmit: ``send(_:)`` encodes an
+/// ``OutboundMessage`` in the wire format the connection speaks (RAW frames
+/// are fast-packet fragmented as needed). UDP receivers and web sources are
+/// receive-only.
+///
+/// The session also maintains the network's ``NMEA2000DeviceDirectory`` from
+/// the frames it relays — ``devices()`` for the inventory, and
+/// ``interrogateDevices(destination:)`` for the ISO Request roll call that
+/// makes every device announce itself.
+public final class NMEASession: @unchecked Sendable {
+	// @unchecked: every mutable member is only ever touched under `lock` —
+	// the type upholds Sendable by construction (`frames` is written once,
+	// before the session escapes the factory).
+	private let lock = NSLock()
+	private var sender: (@Sendable (String) async throws -> Void)?
+	/// Direct message delivery, bypassing wire encoding — the simulator's
+	/// command path. Takes precedence over `sender` when set.
+	private var messageHandler: (@Sendable (OutboundMessage) -> Void)?
+	private var wireFormat: NMEAInputFormat
+	private var directory = NMEA2000DeviceDirectory()
+	private var sequence: UInt8 = 0
+
+	/// The inbound frames. Discarding the stream closes the connection.
+	public internal(set) var frames: AsyncThrowingStream<NMEAFrame, any Error> =
+		AsyncThrowingStream { $0.finish() }
+
+	init(format: NMEAInputFormat) {
+		self.wireFormat = format
+	}
+
+	/// Whether the connection can transmit: an outbound channel exists (TCP,
+	/// or the simulator's direct handler) and the resolved wire format
+	/// accepts client transmissions.
+	public var isTransmitCapable: Bool {
+		lock.withLock {
+			messageHandler != nil || (sender != nil && OutboundEncoder.canTransmit(wireFormat))
+		}
+	}
+
+	/// The connection's wire format — `.auto` until the first received line
+	/// resolves the detection.
+	public var resolvedFormat: NMEAInputFormat {
+		lock.withLock { wireFormat }
+	}
+
+	/// The devices heard on the NMEA 2000 network so far, by source address.
+	public func devices() -> [NMEA2000Device] {
+		lock.withLock { directory.devices }
+	}
+
+	/// The device claiming the given source address, if heard.
+	/// - Parameter address: The source address to look up.
+	public func device(at address: UInt8) -> NMEA2000Device? {
+		lock.withLock { directory[address] }
+	}
+
+	/// Encodes and transmits a message in the connection's wire format.
+	///
+	/// - Parameter message: The message to send.
+	/// - Throws: ``BoatCloudError/transport(_:)`` when the connection is
+	///   receive-only, the wire format is not resolved yet (auto-detection
+	///   needs one received line), or it cannot carry this message.
+	public func send(_ message: OutboundMessage) async throws {
+		if let handler = lock.withLock({ messageHandler }) {
+			handler(message)
+			return
+		}
+		let (sender, format, sequence):
+			(
+				(@Sendable (String) async throws -> Void)?, NMEAInputFormat, UInt8
+			) = lock.withLock {
+				// Roll the fast-packet sequence so interleaved multi-frame
+				// transmissions stay reassemblable on the bus.
+				let current = self.sequence
+				if case .nmea2000(_, _, _, let data) = message, data.count > 8 {
+					self.sequence = (self.sequence + 1) & 0x07
+				}
+				return (self.sender, self.wireFormat, current)
+			}
+		guard let sender else {
+			throw BoatCloudError.transport("connection is receive-only")
+		}
+		guard format != .auto else {
+			throw BoatCloudError.transport("wire format not resolved yet — receive a line first")
+		}
+		guard let lines = OutboundEncoder.lines(message, format: format, sequence: sequence)
+		else {
+			throw BoatCloudError.transport("the \(format) format cannot carry this message")
+		}
+		try await sender(lines.map { $0 + "\r\n" }.joined())
+	}
+
+	/// Broadcasts the ISO Requests (PGN 59904) that make every device
+	/// announce itself — address claim, product information, configuration
+	/// information and PGN list. Collect the answers from ``devices()``.
+	///
+	/// - Parameter destination: The queried address. Defaults to 255, the
+	///   global address.
+	/// - Throws: The same conditions as ``send(_:)``.
+	public func interrogateDevices(destination: UInt8 = 255) async throws {
+		for message in NMEA2000DeviceDirectory.interrogationMessages(destination: destination) {
+			try await send(message)
+		}
+	}
+
+	// MARK: Internal taps
+
+	func attachSender(_ send: @escaping @Sendable (String) async throws -> Void) {
+		lock.withLock { sender = send }
+	}
+
+	func attachMessageHandler(_ handler: @escaping @Sendable (OutboundMessage) -> Void) {
+		lock.withLock { messageHandler = handler }
+	}
+
+	func resolveFormat(_ format: NMEAInputFormat) {
+		lock.withLock { wireFormat = format }
+	}
+
+	func observeDevice(pgn: UInt32, source: UInt8, data: [UInt8]) {
+		// `apply` is discardable, but `withLock` forwards its result as its own.
+		_ = lock.withLock { directory.apply(pgn: pgn, source: source, data: data) }
+	}
 }
 
 // MARK: - Multipart assembler
@@ -511,9 +697,16 @@ private final class FrameDispatcher {
 	private let fastPacketAssembler = FastPacketAssembler()
 	private let aisTracker = AISTargetTracker()
 
-	init(config: NMEATransportConfig, emit: @escaping @Sendable (NMEAFrame) -> Void) {
+	private let onFormatResolved: (@Sendable (NMEAInputFormat) -> Void)?
+
+	init(
+		config: NMEATransportConfig,
+		emit: @escaping @Sendable (NMEAFrame) -> Void,
+		onFormatResolved: (@Sendable (NMEAInputFormat) -> Void)? = nil
+	) {
 		self.config = config
 		self.emit = emit
+		self.onFormatResolved = onFormatResolved
 		self.detectedFormat = config.format
 	}
 
@@ -530,7 +723,10 @@ private final class FrameDispatcher {
 			// envelope, so route them per-line like $PCDIN.
 			perLineFormat = .iKonvert
 		} else {
-			if detectedFormat == .auto { detectedFormat = Self.detect(line) }
+			if detectedFormat == .auto {
+				detectedFormat = Self.detect(line)
+				if detectedFormat != .auto { onFormatResolved?(detectedFormat) }
+			}
 			perLineFormat = detectedFormat
 		}
 		switch perLineFormat {

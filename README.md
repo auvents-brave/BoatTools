@@ -4,18 +4,22 @@ Swift CLI tools to explore sailboat data sources, in **strict concurrency mode**
 
 The package ships two products:
 
-- **`BoatToolsKit`** — library, multiplatform. All the business logic: NMEA / Signal K / Victron VRM clients, parsers, Bonjour discovery, Apple device sensors.
-- **`boattools`** — executable, ArgumentParser-based CLI on top of the library. Six subcommands: `connect`, `file`, `vrm`, `discover`, `gmdss`, `simulate`. The Apple device sensors are a `BoatToolsKit` feature only — they are not exposed by the CLI.
+- **`BoatToolsKit`** — library, multiplatform. All the business logic: NMEA / Signal K / Victron VRM clients, parsers, Bonjour discovery, on-device sensors (Apple CoreLocation/CoreMotion directly, or host-pushed on Android / Windows).
+- **`boattools`** — executable, ArgumentParser-based CLI on top of the library. Nine subcommands: `connect`, `devices`, `pilot`, `windlass`, `file`, `vrm`, `discover`, `gmdss`, `simulate`. The device-sensor fallback is a `BoatToolsKit` feature only — it is not exposed by the CLI.
 
 A third piece lives in the nested [`Bridge/`](Bridge) package:
 **libBoatToolsBridge**, a dynamic library exposing `BoatToolsKit` through a
 plain C ABI (`boattools_bridge_*`) — NMEA parsing, streaming connections
-(TCP / UDP / simulator, polled), a device-sensor feed, AIS target details and
-GMDSS forecasts — so non-Swift hosts (C# via P/Invoke, Python via ctypes…)
-reuse the same decoding and transports instead of reimplementing them. Build
-it with `swift build -c release` from `Bridge/` (on Windows, pass the CCurl
-include/lib flags as for the CLI); every returned string is a caller-owned
-UTF-8 buffer released with `boattools_bridge_string_free`.
+(TCP / UDP / simulator, polled), a host-pushed device-sensor feed (position,
+heading, barometric pressure — for Android / Windows hosts that read their
+own hardware and push it in), AIS target details, GMDSS forecasts, the NMEA
+2000 device inventory with an ISO Request roll call, and autopilot /
+windlass commands — so non-Swift hosts (C# via P/Invoke, Python via
+ctypes…) reuse the same decoding, transports and commands instead of
+reimplementing them. Build it with `swift build -c release` from `Bridge/`
+(on Windows, pass the CCurl include/lib flags as for the CLI); every
+returned string is a caller-owned UTF-8 buffer released with
+`boattools_bridge_string_free`.
 
 ## Install
 
@@ -126,6 +130,7 @@ verifies that the produced executable imports no curl/zlib DLL.)
 - `SignalKClient`: `final class Sendable`, mutable token managed by an internal `actor TokenStore`. Authentication via bearer token or username / password.
 - `VictronVRMClient`: `final class Sendable`, no mutable state.
 - `NMEATransport`: `struct Sendable`. State (LineAggregator, FrameDispatcher, the assemblers) is **confined to the single task that consumes the byte stream** — no manual lock and no `@unchecked Sendable`.
+- `NMEASession`: `final class @unchecked Sendable` — the outbound path (the device directory, the resolved wire format, the fast-packet sequence counter) is reachable from both the consuming task and any caller of `send(_:)`, so every mutable member is confined behind an `NSLock` instead of task confinement; justified in a comment at the declaration site, per the project's `@unchecked Sendable` convention.
 - Explicit lifecycle: async `shutdown()`, no magic deinit.
 - Upcoming features enabled: `ExistentialAny`, `InternalImportsByDefault`.
 - Diagnostic frames: every transport emits `.invalidChecksum(rawLine:)` for bad-XOR NMEA sentences and `.unknown(rawLine:)` for unparseable lines / non-conforming Signal K JSON. The CLI prints them in red / orange when stdout is a TTY.
@@ -147,6 +152,7 @@ frames to the clients and the metric store and let them dispatch.
 - `FileFrame` — frame + optional embedded timestamp, emitted by file replay.
 - `ReplayPacing` — how a recorded log is replayed: honour the file's own timestamps, or emit at a fixed number of lines per second.
 - `BoatCloudError` — transport / parsing failure.
+- `CommandError` — an autopilot / windlass order could not be sent: `.noAutopilot`, `.unsupportedAutopilot(_:)` (an identified brand with no implemented dialect), `.unsupportedCommand(_:dialect:)` (a dialect gap, e.g. no absolute locked heading).
 - NMEA enums: `TalkerId`, `MessageId`, `AisMessageType`, `NavigationStatus`, `ManeuverIndicator`, `ShipType`, `NavigationalAidType`.
 
 **Metric store** — observable aggregation of resolved metrics. See [`METRIC_STORE.md`](METRIC_STORE.md).
@@ -157,19 +163,26 @@ frames to the clients and the metric store and let them dispatch.
 **Clients** — talk to live data sources.
 - `SignalKClient` — REST snapshots (`snapshot(...)`), WebSocket live stream (`liveStream(...)`), and raw NDJSON delta streams over TCP / UDP (`tcpStream(...)`, `udpStream(...)`), with token- or password-based auth (`login(...)`).
 - `VictronVRMClient` — VRM Portal HTTP API: `installations()`, `diagnostics(siteId:)`, and `metrics(siteId:)` mapped onto canonical metric names nested under per-device prefixes (`battery.0.`, `solar.1.`, `tank.`, `vebus.`, `system.`). `labels(...)` fetches the installation's custom device names; `frameStream(...)` polls continuously, or takes a single snapshot when the interval is zero. `DiagnosticRecord` exposes `device`, `instance` and a `unit` stripped of its printf format.
-- `GMDSSForecastService` — official GMDSS high-seas text forecasts from the WMO WWMIWS service: `forecast(metarea:)` for a whole METAREA (1–21), or `forecast(latitude:longitude:)` which resolves the position to its METAREA and keeps the matching directional sub-bulletin. The transport is injectable (`URLSession` by default); `GMDSSForecast` / `GMDSSBulletin` carry the title, issue time, sub-area label and body text.
-- `NMEASimulator` — generates a synthetic NMEA 2000 passage as an `NMEAFrame` stream (`frameStream(route:speedKnots:timeMultiplier:loop:)`): position, COG/SOG, heading, wind, depth and AIS, along a `SimulatorRoute` (`SimulatorRoute.presets`, e.g. `.monacoToMaddalena`). `historyBackfill(...)` seeds the store with a plausible past so charts are not empty on connect.
+- `GMDSSForecastService` — official GMDSS high-seas text forecasts from the WMO WWMIWS service: `forecast(metarea:)` for a whole METAREA (1–21), or `forecast(latitude:longitude:)` which resolves the position to its METAREA and keeps the matching directional sub-bulletin. The transport is injectable (`URLSession` by default); `GMDSSForecast` / `GMDSSBulletin` carry the title, issue time, sub-area label and body text. The position resolution and sub-bulletin split are also exposed standalone — `metarea(latitude:longitude:)` and `bulletins(_:coveringLatitude:longitude:in:)` — for callers holding an already-fetched (e.g. logged) bulletin set.
+- `NMEASimulator` — generates a synthetic NMEA 2000 passage as an `NMEAFrame` stream (`frameStream(route:speedKnots:timeMultiplier:loop:)`): position, COG/SOG, heading, wind, depth and AIS, along a `SimulatorRoute` (`SimulatorRoute.presets`, e.g. `.monacoToMaddalena`). `historyBackfill(...)` seeds the store with a plausible past so charts are not empty on connect. `session(route:speedKnots:timeMultiplier:updateInterval:loop:)` returns a full `NMEASession` instead: the same passage plus a simulated NMEA 2000 network — a Raymarine Evolution autopilot and two windlasses — that answers the ISO Request roll call, broadcasts its status and obeys the commands sent back on the session, so a pilot/windlass remote control can be exercised with no boat attached.
 - Each client also offers `static` stream factories (`SignalKClient.liveStream(config:)` / `.tcpStream(...)` / `.udpStream(...)`, `VictronVRMClient.frameStream(accessToken:siteId:...)`) that manage the underlying transport internally, so callers can pipe them straight into the store without touching the networking stack.
 
 **Transport** — NMEA over TCP / UDP / file.
-- `NMEATransport` — opens a TCP or UDP socket, demultiplexes lines, runs the multipart / fast-packet / GSV assemblers, emits `NMEAFrame` values.
+- `NMEATransport` — opens a TCP or UDP socket, demultiplexes lines, runs the multipart / fast-packet / GSV assemblers, emits `NMEAFrame` values. `session(config:)` returns an `NMEASession` instead of a bare stream when the outbound path is wanted too.
+- `NMEASession` — a live connection: the inbound `frames` stream plus, on TCP, transmission onto the network. `send(_:)` encodes an `OutboundMessage` in the connection's wire format; `isTransmitCapable` tells whether the connection can speak at all; `devices()` / `device(at:)` expose the connection's own device directory; `interrogateDevices(destination:)` broadcasts the ISO Request roll call.
+- `OutboundMessage` — a protocol-neutral message to transmit (an autopilot command, a windlass order, an ISO request): `.nmea0183(body:)` gains its `$` and checksum, `.nmea2000(pgn:destination:priority:data:)` is encoded per gateway envelope — RAW frames with fast-packet fragmentation, iKonvert `!PDGY`, SeaSmart `$PCDIN`. Receive-only formats (Signal K, Canboat PLAIN, UDP listeners) refuse to transmit.
+- `ConnectionMultiplexer.send(_:toDeviceAt:)` — routes an outbound message in "listen to everything" mode: to the session(s) that heard the target source address when known, otherwise to every transmit-capable session.
+- `NMEA2000Commands` — command builders for the devices a sailor drives. `autopilot(in:)` identifies the pilot (ISO class 40 / function 150) and selects its dialect from the manufacturer code (`AutopilotBrand`); `messages(for:brand:destination:)` encodes an `AutopilotCommand` (standby / engage / wind-vane / track / ±N° / locked heading). Implemented dialects: **Raymarine Evolution** (126208 writes of 65379 and 65360, SeaTalk 126720 keystrokes), **Navico** — Simrad NAC-2/NAC-3, B&G — (Simnet AP command, PGN 130850, canboat layout) and **Garmin Reactor** (proprietary 126720, community reverse-engineering, alpha); Furuno and unknown brands are named but refused. `seatalkSentences(for:)` carries the same orders as Seatalk 1 keystrokes (`$STALK,86,11,…`) for Raymarine pilots behind an NMEA 0183 converter — `NMEASession.send(_: AutopilotCommand)` picks them automatically on an 0183 connection. `message(for:windlassID:destination:)` builds the **standard** windlass order (a 126208 command of PGN 128776) — `WindlassCommand`: up / down / off; NMEA 2000 only (0183 has no windlass sentence, Signal K no standard control path).
+- `SignalKClient.put(path:value:)` / `.autopilot(_:)` — commands through a Signal K server: the `steering.autopilot` PUT paths of the server's autopilot API (state, target heading, adjust), relayed to the pilot by the server's own plugin.
 - `NMEATransportMode`, `NMEAInputFormat` — configuration enums.
+- `NMEA2000DeviceDirectory` / `NMEA2000Device` — inventory of the devices on the NMEA 2000 network, accumulated from the device-information PGNs (60928 address claims, 126996 product information, 126998 configuration information, 126464 PGN lists, 126993 heartbeats): manufacturer, model, serial, versions, class / function, instances, load equivalency, PGN lists, last seen. `interrogationLines(destination:)` yields the ISO Requests (YD RAW transmit format) that make every device announce itself.
 - `ConnectionOwnershipManager` — AppGroup-backed primary / secondary election so several processes (e.g. main app + widget) can share one upstream connection.
 
-**Device sensors** — Apple-only fallback.
-- `DeviceSensors` — CoreLocation + CoreMotion bridge, emitting `BoatMetric` for `lat`, `lon`, `SOG`, `COG`, `HDG.*`, `pressure.atmospheric`.
-- `DeviceSensorsConfig` — sensor-selection and accuracy knobs.
-- `DeviceFallback` (with `DeviceFallback.Config`) — watches the store and starts the relevant device sensor only while a given metric (position, heading, pressure) is missing or stale, automatically standing down when network data returns.
+**Device sensors** — the phone/laptop's own GPS, compass and barometer, as a fallback when the boat's network has nothing.
+- `DeviceSensors` — Apple-only (CoreLocation + CoreMotion), emitting `BoatMetric` for `lat`, `lon`, `SOG`, `COG`, `HDG.*`, `pressure.atmospheric`.
+- `DeviceSensorsConfig` — sensor-selection and accuracy knobs (`DeviceSensors`).
+- `DeviceFallback` (with `DeviceFallback.Config`) — Apple-only; watches the store and starts `DeviceSensors` only while a given metric (position, heading, pressure) is missing or stale, automatically standing down when network data returns.
+- `ExternalSensorFeed` — the Android / Windows equivalent: Swift cannot read those platforms' hardware directly, so the **host** reads its own GPS/compass/barometer APIs and pushes readings in — `pushLocation(latitude:longitude:altitudeMetres:speedMetresPerSecond:courseDegrees:timestamp:)`, `pushHeading(magneticDegrees:trueDegrees:timestamp:)` (also derives `magneticVariation` when both headings are given), `pushPressure(hectopascals:timestamp:)` — turning them into the exact same canonical metrics `DeviceSensors` emits, so downstream code stays platform-blind. Thread-safe (push from any thread); `stream()` yields the canonical `BoatMetric`s. This is what the bridge's `boattools_bridge_open_device_feed` / `_push_location` / `_push_heading` / `_push_pressure` wrap for non-Swift hosts (e.g. ThoosaUno's C# `DeviceSensorsService` on Android and Windows).
 
 **Parsing** — most parsers are internal. The one exposed type:
 - `NMEA0183Parser` — stateless sentence parser used by the CLI to filter decoded vs unknown sentence types. NMEA 2000, AIS, SeaSmart, Canboat, iKonvert and YD RAW decoders are reached indirectly through `NMEATransport`. Full decoder coverage in [`DECODERS.md`](DECODERS.md).
@@ -198,11 +211,15 @@ Which NMEA 0183 sentences, NMEA 2000 PGNs and Signal K paths `BoatToolsKit` deco
   - [NMEA 2000](DECODERS.md#nmea-2000)
   - [Signal K](DECODERS.md#signal-k)
   - [Index by canonical metric](DECODERS.md#index-by-canonical-metric)
+  - [Transmitted frames (outbound)](DECODERS.md#transmitted-frames-outbound) — the pilot / windlass / roll-call frames the library sends
 
 ## Commands
 
 ```
 boattools connect    — all transports: TCP, UDP broadcast/multicast, Signal K web
+boattools devices    — inventory the devices present on the NMEA 2000 network
+boattools pilot      — send an order to the autopilot (brand dialect auto-selected)
+boattools windlass   — drive the anchor windlass (standard NMEA 2000 order)
 boattools file       — read and parse a local log file
 boattools vrm        — Victron VRM cloud
 boattools discover   — LAN discovery via Bonjour/mDNS
@@ -226,6 +243,9 @@ boattools --version  — print the version string
 - [Signal K snapshot polled every 30s forever (Ctrl-C to stop)](#signal-k-snapshot-polled-every-30s-forever-ctrl-c-to-stop)
 - [Signal K via Victron's authenticated relay](#signal-k-via-victrons-authenticated-relay)
 - [Capture a live session to a log file](#capture-a-live-session-to-a-log-file)
+
+**`devices`**
+- [Inventory the NMEA 2000 network](#inventory-the-nmea-2000-network)
 
 **`file`**
 - [Read a local log file — dump as fast as possible](#read-a-local-log-file--dump-as-fast-as-possible)
@@ -347,6 +367,95 @@ Bare YD RAW frames carry no timestamp, so on capture they are written with a
 `<HH:mm:ss.SSS> R` prefix — this lets `file --realtime` replay the capture at the
 original pace. Other formats already embed a timestamp (or carry their own
 framing) and are written verbatim.
+
+---
+
+### Inventory the NMEA 2000 network
+
+```sh
+# TCP RAW gateway — broadcasts an ISO Request first, so every device answers
+./boattools devices --host 10.0.0.50 --port 1457
+
+# UDP broadcast — purely passive (devices are heard as they announce themselves)
+./boattools devices --port 2000 --format ydraw --duration 30
+```
+
+Collects the device-information PGNs — 60928 address claims, 126996 product
+information, 126998 configuration information, 126464 PGN lists, 126993
+heartbeats — and prints one block per device: manufacturer, model, serial,
+software version, class / function, instances, certification, load
+equivalency, transmitted and received PGNs.
+
+```
+━━ @035  GPS 24xd — Garmin ━━
+  kind           Navigation · Ownship Position (GNSS)
+  instances      device 0 · system 0
+  unique number  123456
+  NAME           0xC27891051CA1E240 · self-addressing
+  product code   9876
+  software       2.60
+  serial         SN-0042
+  transmits      126992, 129025, 129026, 129029, 129539, 129540
+  heartbeat      every 60.0 s
+  last seen      14:07:12
+```
+
+On UDP (receive-only) the command stays passive; use `--no-request` to force
+the same on TCP. Signal K web sources do not relay these PGNs — point the
+command at the gateway itself.
+
+---
+
+### Drive the autopilot and the windlass
+
+```sh
+# Identify the pilot (ISO class 40 / function 150), speak its dialect
+./boattools pilot auto --host 10.0.0.50 --port 1457
+./boattools pilot -- -10 --host 10.0.0.50 --port 1457     # 10° to port
+./boattools pilot heading 235 --host 10.0.0.50 --port 1457
+./boattools pilot standby --host 10.0.0.50 --port 1457
+
+# The standard NMEA 2000 windlass order (a command of PGN 128776)
+./boattools windlass up --host 10.0.0.50 --port 1457
+./boattools windlass off --host 10.0.0.50 --port 1457
+```
+
+The pilot command first broadcasts the ISO Request roll call, waits for the
+autopilot's address claim, then encodes the order in the brand's dialect.
+
+Two more transports carry the same orders:
+
+```sh
+# Raymarine behind a Seatalk 1 ⇄ NMEA 0183 converter — $STALK keystrokes
+./boattools pilot standby --host 10.0.0.51 --port 10110 --format nmea0183
+
+# Through a Signal K server's autopilot API (server-side plugin required)
+./boattools pilot auto --url http://10.0.0.60:3000 --token XYZ
+```
+
+#### Autopilot support matrix
+
+| Pilot | Protocol | Frames | standby / auto / wind | track | ±N° | heading D | Status |
+|---|---|---|---|---|---|---|---|
+| Raymarine Evolution (EV-1/EV-2) | NMEA 2000 | 126208 writes of 65379 / 65360, SeaTalk keystrokes on 126720 | ✓ | ✓ | ✓ | ✓ | community sequences, not yet hardware-validated |
+| Raymarine Seatalk 1 (ST1000+, ST4000+, …) | NMEA 0183 via a Seatalk converter | `$STALK,86,11,…` keystrokes | ✓ | ✓ | ✓ | — | keystroke codes per the Seatalk reference |
+| Navico — Simrad NAC-2/NAC-3, B&G, Lowrance | NMEA 2000 | Simnet AP command, PGN 130850 | ✓ | ✓ | ✓ | — | canboat layout, proven on NAC-3 by the Signal K plugin |
+| Garmin Reactor | NMEA 2000 | proprietary 126720 | ✓ (no track) | — | ✓ (±15°/±1° steps) | — | **alpha** — community reverse-engineering |
+| Any pilot behind a Signal K server | Signal K | PUT `steering.autopilot.*` | ✓ | ✓ | ✓ | ✓ | needs the server's autopilot plugin |
+| **Furuno NavPilot** | — | — | — | — | — | — | **not supported** — no public dialect; identified and refused by name |
+| Other / unknown brands | — | — | — | — | — | — | **not supported** — identified and refused by name |
+
+“—” inside a supported row means the dialect itself cannot express that
+order (the library refuses with the command and dialect names rather than
+sending a guess).
+
+#### Windlass support matrix
+
+| Protocol | Frames | up / down / off | Notes |
+|---|---|---|---|
+| NMEA 2000 | 126208 command of PGN 128776 (direction control) | ✓ | the **standard** order — brand-independent (Lewmar, Maxwell, Quick…), addressed to the windlass heard on the bus or broadcast, `--windlass` selects the unit |
+| NMEA 0183 | — | — | **not supported** — the standard defines no windlass sentence |
+| Signal K | — | — | **not supported** — no standard control path in the specification |
 
 ---
 
