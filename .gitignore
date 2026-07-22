@@ -9,4 +9,7 @@ xcode
 commands.sh
 
 # Generated at build time by Scripts/version.sh — never committed.
-Sources/BoatTools/Version.generated.swift.build-linux
+Sources/BoatTools/Version.generated.swift
+
+# Docker cross-build tree for the Linux bridges.
+.build-linux
