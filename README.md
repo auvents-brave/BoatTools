@@ -12,9 +12,9 @@ A third piece lives in the nested [`Bridge/`](Bridge) package:
 plain C ABI (`boattools_bridge_*`) — NMEA parsing, streaming connections
 (TCP / UDP / simulator, polled), a host-pushed device-sensor feed (position,
 heading, barometric pressure — for Android / Windows hosts that read their
-own hardware and push it in), AIS target details, GMDSS forecasts, the NMEA
-2000 device inventory with an ISO Request roll call, and autopilot /
-windlass commands — so non-Swift hosts (C# via P/Invoke, Python via
+own hardware and push it in), AIS target details, Wikimedia vessel
+photographs, GMDSS forecasts, the NMEA 2000 device inventory with an ISO
+Request roll call, and autopilot / windlass commands — so non-Swift hosts (C# via P/Invoke, Python via
 ctypes…) reuse the same decoding, transports and commands instead of
 reimplementing them. Build it with `swift build -c release` from `Bridge/`
 (on Windows, pass the CCurl include/lib flags as for the CLI); every
