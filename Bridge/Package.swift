@@ -29,6 +29,15 @@ let package = Package(
 				.enableUpcomingFeature("ExistentialAny"),
 				.swiftLanguageMode(.v6),
 			]
-		)
+		),
+		.testTarget(
+			name: "BoatToolsBridgeTests",
+			dependencies: ["BoatToolsBridge"],
+			swiftSettings: [
+				.enableUpcomingFeature("InternalImportsByDefault"),
+				.enableUpcomingFeature("ExistentialAny"),
+				.swiftLanguageMode(.v6),
+			]
+		),
 	]
 )

@@ -124,12 +124,17 @@ final class BridgeConnection: Sendable {
 		var metrics: [MetricPayload] = []
 		var targets: [Int: (target: AISTarget, seen: Date)] = [:]
 		var devices = NMEA2000DeviceDirectory()
+		/// Whether anything at all has arrived. Unlike `metrics`, which `drain`
+		/// empties on every poll, this only ever goes from false to true — it is
+		/// what tells a connection test that the source is alive.
+		var received = false
 	}
 
 	private let state = Mutex(State())
 
 	func append(_ metric: BoatMetric) {
 		state.withLock { s in
+			s.received = true
 			s.metrics.append(
 				MetricPayload(
 					name: metric.name,
@@ -148,6 +153,7 @@ final class BridgeConnection: Sendable {
 	func update(_ target: AISTarget) {
 		guard target.latitude != nil, target.longitude != nil else { return }
 		state.withLock { s in
+			s.received = true
 			s.targets[target.mmsi] = (target, Date())
 			// Bound memory: forget targets gone for over an hour.
 			if s.targets.count > 512 {
@@ -162,8 +168,15 @@ final class BridgeConnection: Sendable {
 		// `apply` reports whether the frame changed the directory; the feed
 		// polls the inventory instead, so the answer is of no use here.
 		_ = state.withLock { s in
-			s.devices.apply(pgn: pgn, source: source, data: data)
+			s.received = true
+			return s.devices.apply(pgn: pgn, source: source, data: data)
 		}
+	}
+
+	/// Whether data has arrived, and how the stream is faring — what a
+	/// connection test watches.
+	func probe() -> (received: Bool, status: String, error: String?) {
+		state.withLock { ($0.received, $0.status, $0.error) }
 	}
 
 	/// The network device inventory as of now.
