@@ -1,6 +1,6 @@
-// AIS target details and GMDSS high-seas forecasts for the C ABI — the data
-// behind the chart's target panel and context menu, sourced from BoatToolsKit
-// exactly like the Swift app.
+// AIS target details, vessel photographs and GMDSS high-seas forecasts for the
+// C ABI — the data behind the chart's target panel and context menu, sourced
+// from BoatToolsKit exactly like the Swift app.
 
 internal import BoatToolsKit
 internal import Dispatch
@@ -92,27 +92,12 @@ public func boattools_bridge_ais_detail(_ handle: Int64, _ mmsi: Int64) -> Unsaf
 	return cString(String(decoding: data, as: UTF8.self))
 }
 
-// MARK: - GMDSS forecasts
+// MARK: - Shared plumbing
 
-/// What the GMDSS functions return.
-private struct GmdssPayload: Encodable {
-	let ok: Bool
-	var error: String?
-	var metarea = 0
-	var title = ""
-	var issued = ""
-	var bulletins: [Bulletin] = []
-
-	struct Bulletin: Encodable {
-		let label: String
-		let text: String
-	}
-}
-
-/// The portable HTTP fetch for `GMDSSForecastService` — BoatToolsKit's
-/// transport works on every bridge platform (NIO on macOS/Linux/Android,
-/// libcurl on Windows), where `URLSession` does not.
-private let gmdssFetch: GMDSSForecastService.Fetch = { url in
+/// The portable HTTP fetch the services are given — BoatToolsKit's transport
+/// works on every bridge platform (NIO on macOS/Linux/Android, libcurl on
+/// Windows), where `URLSession` does not.
+private let portableFetch: GMDSSForecastService.Fetch = { url in
 	let transport = NetworkStack.makeHTTPTransport()
 	do {
 		let response = try await transport.execute(HTTPRequest(url: url.absoluteString))
@@ -139,6 +124,65 @@ private func awaitBlocking<T: Sendable>(_ operation: @escaping @Sendable () asyn
 	return box.withLock { $0! }
 }
 
+// MARK: - Vessel photographs
+
+/// What `boattools_bridge_vessel_photo` returns.
+private struct VesselPhotoPayload: Encodable {
+	let found: Bool
+	var image: String?
+	var page: String?
+	var name: String?
+	var credit: String?
+}
+
+/// One service for the whole process, so its cache — hits *and* misses — is
+/// shared by every lookup the host makes.
+private let vesselPhotos = VesselPhotoService(fetch: portableFetch)
+
+/// A freely-licensed photograph of the vessel carrying an IMO number, from
+/// Wikimedia Commons. Most vessels have none — that is a `found:false`, not an
+/// error. Blocks on the network — call from a background thread.
+///
+/// The photographs are Creative Commons: `credit` **must** be shown wherever
+/// `image` is, and `page` carries the full licence terms.
+/// - Returns: JSON `{"found","image","page","name","credit"}` to release with
+///   `boattools_bridge_string_free`.
+@_cdecl("boattools_bridge_vessel_photo")
+public func boattools_bridge_vessel_photo(_ imo: Int64, _ width: Int32) -> UnsafeMutablePointer<CChar>? {
+	let payload: VesselPhotoPayload = awaitBlocking {
+		guard let photo = await vesselPhotos.photo(imo: Int(imo), width: Int(width)) else {
+			return VesselPhotoPayload(found: false)
+		}
+		return VesselPhotoPayload(
+			found: true,
+			image: photo.imageURL.absoluteString,
+			page: photo.descriptionURL.absoluteString,
+			name: photo.vesselName,
+			credit: photo.credit)
+	}
+	guard let data = try? JSONEncoder().encode(payload) else {
+		return cString(#"{"found":false}"#)
+	}
+	return cString(String(decoding: data, as: UTF8.self))
+}
+
+// MARK: - GMDSS forecasts
+
+/// What the GMDSS functions return.
+private struct GmdssPayload: Encodable {
+	let ok: Bool
+	var error: String?
+	var metarea = 0
+	var title = ""
+	var issued = ""
+	var bulletins: [Bulletin] = []
+
+	struct Bulletin: Encodable {
+		let label: String
+		let text: String
+	}
+}
+
 /// The METAREA (1…21) whose box contains a position, or 0 when the position
 /// falls outside every known area. Instant — no network.
 @_cdecl("boattools_bridge_gmdss_metarea")
@@ -152,7 +196,7 @@ public func boattools_bridge_gmdss_metarea(_ latitude: Double, _ longitude: Doub
 ///   [{label,text}]}` to release with `boattools_bridge_string_free`.
 @_cdecl("boattools_bridge_gmdss_forecast")
 public func boattools_bridge_gmdss_forecast(_ metarea: Int32) -> UnsafeMutablePointer<CChar>? {
-	encodeGmdss { try await GMDSSForecastService(fetch: gmdssFetch).forecast(metarea: Int(metarea)) }
+	encodeGmdss { try await GMDSSForecastService(fetch: portableFetch).forecast(metarea: Int(metarea)) }
 }
 
 /// The GMDSS bulletin(s) covering a position — the METAREA resolved and the
@@ -164,7 +208,7 @@ public func boattools_bridge_gmdss_forecast_at(
 	_ latitude: Double, _ longitude: Double
 ) -> UnsafeMutablePointer<CChar>? {
 	encodeGmdss {
-		try await GMDSSForecastService(fetch: gmdssFetch)
+		try await GMDSSForecastService(fetch: portableFetch)
 			.forecast(latitude: latitude, longitude: longitude)
 	}
 }

@@ -4,7 +4,7 @@ Swift CLI tools to explore sailboat data sources, in **strict concurrency mode**
 
 The package ships two products:
 
-- **`BoatToolsKit`** — library, multiplatform. All the business logic: NMEA / Signal K / Victron VRM clients, parsers, Bonjour discovery, on-device sensors (Apple CoreLocation/CoreMotion directly, or host-pushed on Android / Windows).
+- **`BoatToolsKit`** — library, multiplatform. All the business logic: NMEA / Signal K / Victron VRM clients, parsers, Bonjour discovery, on-device sensors (Apple CoreLocation/CoreMotion directly, or host-pushed on Android / Windows), and lookups against public services — WMO for GMDSS forecasts, Wikimedia for vessel photographs.
 - **`boattools`** — executable, ArgumentParser-based CLI on top of the library. Nine subcommands: `connect`, `devices`, `pilot`, `windlass`, `file`, `vrm`, `discover`, `gmdss`, `simulate`. The device-sensor fallback is a `BoatToolsKit` feature only — it is not exposed by the CLI.
 
 A third piece lives in the nested [`Bridge/`](Bridge) package:
@@ -12,9 +12,9 @@ A third piece lives in the nested [`Bridge/`](Bridge) package:
 plain C ABI (`boattools_bridge_*`) — NMEA parsing, streaming connections
 (TCP / UDP / simulator, polled), a host-pushed device-sensor feed (position,
 heading, barometric pressure — for Android / Windows hosts that read their
-own hardware and push it in), AIS target details, GMDSS forecasts, the NMEA
-2000 device inventory with an ISO Request roll call, and autopilot /
-windlass commands — so non-Swift hosts (C# via P/Invoke, Python via
+own hardware and push it in), AIS target details, Wikimedia vessel
+photographs, GMDSS forecasts, the NMEA 2000 device inventory with an ISO
+Request roll call, and autopilot / windlass commands — so non-Swift hosts (C# via P/Invoke, Python via
 ctypes…) reuse the same decoding, transports and commands instead of
 reimplementing them. Build it with `swift build -c release` from `Bridge/`
 (on Windows, pass the CCurl include/lib flags as for the CLI); every
@@ -151,6 +151,7 @@ frames to the clients and the metric store and let them dispatch.
 - `JSONValue` — `Sendable` JSON tree returned by Signal K REST snapshots.
 - `FileFrame` — frame + optional embedded timestamp, emitted by file replay.
 - `ReplayPacing` — how a recorded log is replayed: honour the file's own timestamps, or emit at a fixed number of lines per second.
+- `VesselPhoto` — a freely-licensed vessel photograph from Wikimedia Commons: image URL, Commons page, vessel name, `author`, `licence`, and a `credit` line ready to render. Its licences require attribution — show the credit wherever the image is shown.
 - `BoatCloudError` — transport / parsing failure.
 - `CommandError` — an autopilot / windlass order could not be sent: `.noAutopilot`, `.unsupportedAutopilot(_:)` (an identified brand with no implemented dialect), `.unsupportedCommand(_:dialect:)` (a dialect gap, e.g. no absolute locked heading).
 - NMEA enums: `TalkerId`, `MessageId`, `AisMessageType`, `NavigationStatus`, `ManeuverIndicator`, `ShipType`, `NavigationalAidType`.
@@ -164,6 +165,7 @@ frames to the clients and the metric store and let them dispatch.
 - `SignalKClient` — REST snapshots (`snapshot(...)`), WebSocket live stream (`liveStream(...)`), and raw NDJSON delta streams over TCP / UDP (`tcpStream(...)`, `udpStream(...)`), with token- or password-based auth (`login(...)`).
 - `VictronVRMClient` — VRM Portal HTTP API: `installations()`, `diagnostics(siteId:)`, and `metrics(siteId:)` mapped onto canonical metric names nested under per-device prefixes (`battery.0.`, `solar.1.`, `tank.`, `vebus.`, `system.`). `labels(...)` fetches the installation's custom device names; `frameStream(...)` polls continuously, or takes a single snapshot when the interval is zero. `DiagnosticRecord` exposes `device`, `instance` and a `unit` stripped of its printf format.
 - `GMDSSForecastService` — official GMDSS high-seas text forecasts from the WMO WWMIWS service: `forecast(metarea:)` for a whole METAREA (1–21), or `forecast(latitude:longitude:)` which resolves the position to its METAREA and keeps the matching directional sub-bulletin. The transport is injectable (`URLSession` by default); `GMDSSForecast` / `GMDSSBulletin` carry the title, issue time, sub-area label and body text. The position resolution and sub-bulletin split are also exposed standalone — `metarea(latitude:longitude:)` and `bulletins(_:coveringLatitude:longitude:in:)` — for callers holding an already-fetched (e.g. logged) bulletin set.
+- `VesselPhotoService` — a freely-licensed vessel photograph by IMO number, via two public Wikimedia APIs: Wikidata (the ship item carrying that IMO in `P458`, and its `P18` image) then Commons (the thumbnail at the requested width, plus the photographer and licence). `photo(imo:width:)` returns a `VesselPhoto` — image URL, Commons page, vessel name, `author`, `licence` and a ready-to-render `credit` — or `nil`, which is the common case: only vessels notable enough for Wikidata *and* pictured on Commons have one (large merchant and passenger ships often, pleasure craft essentially never). A miss is never an error. Lookups are cached in memory, misses included, so revisiting a target costs nothing. **The CC licences require attribution: show `credit` wherever the image is shown.**
 - `NMEASimulator` — generates a synthetic NMEA 2000 passage as an `NMEAFrame` stream (`frameStream(route:speedKnots:timeMultiplier:loop:)`): position, COG/SOG, heading, wind, depth and AIS, along a `SimulatorRoute` (`SimulatorRoute.presets`, e.g. `.monacoToMaddalena`). `historyBackfill(...)` seeds the store with a plausible past so charts are not empty on connect. `session(route:speedKnots:timeMultiplier:updateInterval:loop:)` returns a full `NMEASession` instead: the same passage plus a simulated NMEA 2000 network — a Raymarine Evolution autopilot and two windlasses — that answers the ISO Request roll call, broadcasts its status and obeys the commands sent back on the session, so a pilot/windlass remote control can be exercised with no boat attached.
 - Each client also offers `static` stream factories (`SignalKClient.liveStream(config:)` / `.tcpStream(...)` / `.udpStream(...)`, `VictronVRMClient.frameStream(accessToken:siteId:...)`) that manage the underlying transport internally, so callers can pipe them straight into the store without touching the networking stack.
 

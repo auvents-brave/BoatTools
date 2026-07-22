@@ -159,7 +159,9 @@ final class BridgeConnection: Sendable {
 
 	/// Feeds one raw NMEA 2000 frame into the connection's device directory.
 	func observeDevice(pgn: UInt32, source: UInt8, data: [UInt8]) {
-		state.withLock { s in
+		// `apply` reports whether the frame changed the directory; the feed
+		// polls the inventory instead, so the answer is of no use here.
+		_ = state.withLock { s in
 			s.devices.apply(pgn: pgn, source: source, data: data)
 		}
 	}
