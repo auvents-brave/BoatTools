@@ -4,7 +4,7 @@ Swift CLI tools to explore sailboat data sources, in **strict concurrency mode**
 
 The package ships two products:
 
-- **`BoatToolsKit`** — library, multiplatform. All the business logic: NMEA / Signal K / Victron VRM clients, parsers, Bonjour discovery, on-device sensors (Apple CoreLocation/CoreMotion directly, or host-pushed on Android / Windows).
+- **`BoatToolsKit`** — library, multiplatform. All the business logic: NMEA / Signal K / Victron VRM clients, parsers, Bonjour discovery, on-device sensors (Apple CoreLocation/CoreMotion directly, or host-pushed on Android / Windows), and lookups against public services — WMO for GMDSS forecasts, Wikimedia for vessel photographs.
 - **`boattools`** — executable, ArgumentParser-based CLI on top of the library. Nine subcommands: `connect`, `devices`, `pilot`, `windlass`, `file`, `vrm`, `discover`, `gmdss`, `simulate`. The device-sensor fallback is a `BoatToolsKit` feature only — it is not exposed by the CLI.
 
 A third piece lives in the nested [`Bridge/`](Bridge) package:
@@ -151,6 +151,7 @@ frames to the clients and the metric store and let them dispatch.
 - `JSONValue` — `Sendable` JSON tree returned by Signal K REST snapshots.
 - `FileFrame` — frame + optional embedded timestamp, emitted by file replay.
 - `ReplayPacing` — how a recorded log is replayed: honour the file's own timestamps, or emit at a fixed number of lines per second.
+- `VesselPhoto` — a freely-licensed vessel photograph from Wikimedia Commons: image URL, Commons page, vessel name, `author`, `licence`, and a `credit` line ready to render. Its licences require attribution — show the credit wherever the image is shown.
 - `BoatCloudError` — transport / parsing failure.
 - `CommandError` — an autopilot / windlass order could not be sent: `.noAutopilot`, `.unsupportedAutopilot(_:)` (an identified brand with no implemented dialect), `.unsupportedCommand(_:dialect:)` (a dialect gap, e.g. no absolute locked heading).
 - NMEA enums: `TalkerId`, `MessageId`, `AisMessageType`, `NavigationStatus`, `ManeuverIndicator`, `ShipType`, `NavigationalAidType`.
