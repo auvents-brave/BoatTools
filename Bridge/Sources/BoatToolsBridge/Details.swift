@@ -112,7 +112,7 @@ private let portableFetch: GMDSSForecastService.Fetch = { url in
 /// Runs an async operation to completion on the calling C thread — safe
 /// because P/Invoke callers are .NET worker threads, never part of Swift
 /// concurrency's cooperative pool.
-private func awaitBlocking<T: Sendable>(_ operation: @escaping @Sendable () async -> T) -> T {
+func awaitBlocking<T: Sendable>(_ operation: @escaping @Sendable () async -> T) -> T {
 	let semaphore = DispatchSemaphore(value: 0)
 	let box = Mutex<T?>(nil)
 	Task {

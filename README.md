@@ -9,17 +9,25 @@ The package ships two products:
 
 A third piece lives in the nested [`Bridge/`](Bridge) package:
 **libBoatToolsBridge**, a dynamic library exposing `BoatToolsKit` through a
-plain C ABI (`boattools_bridge_*`) — NMEA parsing, streaming connections
-(TCP / UDP / simulator, polled), a host-pushed device-sensor feed (position,
-heading, barometric pressure — for Android / Windows hosts that read their
-own hardware and push it in), AIS target details, Wikimedia vessel
-photographs, GMDSS forecasts, the NMEA 2000 device inventory with an ISO
-Request roll call, and autopilot / windlass commands — so non-Swift hosts (C# via P/Invoke, Python via
+plain C ABI (`boattools_bridge_*`) — NMEA parsing, streaming connections of
+every kind the app offers (TCP, UDP, a URL for Signal K over `ws`/`http`,
+Victron VRM, a recorded log replayed from disk, and a parametrable synthetic
+passage — all polled), a connection test that waits for the first data, a
+host-pushed device-sensor feed (position, heading, barometric pressure — for
+Android / Windows hosts that read their own hardware and push it in), AIS
+target details, Wikimedia vessel photographs, GMDSS forecasts, the NMEA 2000
+device inventory with an ISO Request roll call, and autopilot / windlass
+commands — so non-Swift hosts (C# via P/Invoke, Python via
 ctypes…) reuse the same decoding, transports and commands instead of
 reimplementing them. Build it with `swift build -c release` from `Bridge/`
 (on Windows, pass the CCurl include/lib flags as for the CLI); every
 returned string is a caller-owned UTF-8 buffer released with
 `boattools_bridge_string_free`.
+
+Several handles can be open at once and polled independently — that is how a
+host builds a multiplexer, one connection per source. Signal K and VRM feeds
+carry no NMEA 2000 session, so they answer no device inventory and accept no
+pilot commands; TCP, the simulator and a replayed log do.
 
 ## Install
 
