@@ -118,11 +118,19 @@
 				// (e.g. older Apple Watch models without a barometer).
 				#if canImport(CoreMotion) && !os(macOS) && !os(tvOS) && !os(visionOS)
 					if config.barometer && CMAltimeter.isRelativeAltitudeAvailable() {
-						altimeter.startRelativeAltitudeUpdates(to: .main) { [weak self] data, _ in
-							guard let self, let p = data?.pressure else { return }
+						// Capture the continuation, never `self`. CoreMotion does not
+						// always honour the queue asked for: a crash report showed this
+						// block arriving through the permission path
+						// (`tccServiceMotionAccessAllowingMac:`) on a dispatch queue
+						// rather than the main one. Reading `self.continuation` there
+						// touches @MainActor state off the main actor, which Swift 6
+						// checks at runtime and terminates the process over. The
+						// continuation is `Sendable`, so the block needs no actor at all.
+						altimeter.startRelativeAltitudeUpdates(to: .main) { data, _ in
+							guard let p = data?.pressure else { return }
 							// CMAltimeter gives kPa; canonical unit is hPa (= mbar).
 							// 1 kPa = 10 hPa → standard atmosphere 101.3 kPa = 1013 hPa.
-							self.continuation?.yield(
+							continuation.yield(
 								BoatMetric(
 									name: "pressure.atmospheric",
 									value: p.doubleValue * 10,
