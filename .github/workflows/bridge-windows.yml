@@ -38,9 +38,11 @@ jobs:
         include:
           - runner: windows-2022
             arch: x64
+            build_arch: amd64
             triplet: x64-windows-static-md
           - runner: windows-11-arm
             arch: arm64
+            build_arch: arm64
             triplet: arm64-windows-static-md
     runs-on: ${{ matrix.runner }}
     steps:
@@ -59,6 +61,9 @@ jobs:
         with:
           branch: swift-${{ env.SWIFT_VERSION }}-release
           tag: ${{ env.SWIFT_VERSION }}-RELEASE
+          # Match the toolchain to the runner — the amd64 default segfaults on the
+          # windows-11-arm runner (STATUS_ACCESS_VIOLATION).
+          build_arch: ${{ matrix.build_arch }}
 
       - name: Cache vcpkg-built libcurl
         uses: actions/cache@v4
