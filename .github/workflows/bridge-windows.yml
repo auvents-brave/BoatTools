@@ -1,10 +1,13 @@
 # Builds the Windows bridge DLLs the ThoosaUno companion app P/Invokes —
 # BoatToolsBridge from this repository and SthenoBridge from the (public)
 # Stheno sibling — plus the Swift runtime DLLs they need, assembled into one
-# artifact. ThoosaUno's Scripts/package-downloads.sh fetches the latest
-# artifact to package the Windows download (ThoosaUno itself is private, so
-# its own Actions cannot build them; Swift also cannot cross-compile to
-# Windows from macOS or Linux).
+# artifact per architecture. ThoosaUno's Scripts/package-downloads.sh fetches
+# the latest artifact to package the Windows downloads (ThoosaUno itself is
+# private, so its own Actions cannot build them; Swift also cannot
+# cross-compile to Windows from macOS or Linux).
+#
+# Two architectures build in parallel (fail-fast off, so an ARM toolchain gap
+# never blocks the x64 download): x64 on windows-2022, arm64 on windows-11-arm.
 name: Bridge Windows
 
 on:
@@ -28,7 +31,18 @@ env:
 
 jobs:
   build:
-    runs-on: windows-2022
+    name: Build (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2022
+            arch: x64
+            triplet: x64-windows-static-md
+          - runner: windows-11-arm
+            arch: arm64
+            triplet: arm64-windows-static-md
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -50,11 +64,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\vcpkg\installed
-          key: vcpkg-curl-websockets-x64-windows-static-md-v1
+          key: vcpkg-curl-websockets-${{ matrix.triplet }}-v1
       # Static triplet (dynamic CRT, matching the Swift runtime) so the
       # bridges are self-contained — no libcurl/zlib DLLs to ship.
       - name: Install libcurl (websockets feature, static)
-        run: vcpkg install curl[websockets]:x64-windows-static-md
+        run: vcpkg install curl[websockets]:${{ matrix.triplet }}
 
       - name: Build SthenoBridge
         working-directory: Stheno/Bridge
@@ -64,8 +78,8 @@ jobs:
         working-directory: BoatTools/Bridge
         run: >-
           swift build -c release
-          -Xcc "-I$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows-static-md\include"
-          -Xlinker "/LIBPATH:$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows-static-md\lib"
+          -Xcc "-I$env:VCPKG_INSTALLATION_ROOT\installed\${{ matrix.triplet }}\include"
+          -Xlinker "/LIBPATH:$env:VCPKG_INSTALLATION_ROOT\installed\${{ matrix.triplet }}\lib"
 
       # The bridges link the Swift runtime dynamically: ship its DLLs next to
       # them so the packaged app needs no Swift installed. The runtime dir is
@@ -93,5 +107,5 @@ jobs:
       - name: Upload bridges artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bridges-windows-x64
+          name: bridges-windows-${{ matrix.arch }}
           path: stage
