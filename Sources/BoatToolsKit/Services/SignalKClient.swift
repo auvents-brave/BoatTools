@@ -180,6 +180,32 @@ public final class SignalKClient: Sendable {
 		}
 	}
 
+	// MARK: Man overboard
+
+	/// Raises (or stands down) a man-overboard alert on the Signal K server by
+	/// PUTting the standard `notifications.mob` notification — Signal-K-aware
+	/// plotters then mark the MOB at the vessel's position and sound the alarm.
+	///
+	/// > Warning: Best-effort, like the NMEA encodings — the path and value follow
+	/// > the Signal K convention but are not verified against a live server here.
+	///
+	/// - Parameter notification: The alert to relay (its
+	///   ``ManOverboardNotification/status`` selects raise vs. stand-down).
+	/// - Throws: ``BoatCloudError`` on network or HTTP errors, or a server refusal.
+	public func manOverboard(_ notification: ManOverboardNotification) async throws {
+		let active = notification.status == .activated
+		let value = MOBNotificationValue(
+			state: active ? "emergency" : "normal", method: ["visual", "sound"], message: "MOB")
+		try await put(path: "notifications.mob", value: value)
+	}
+
+	/// The Signal K notification object a MOB alert PUTs to `notifications.mob`.
+	private struct MOBNotificationValue: Encodable, Sendable {
+		let state: String
+		let method: [String]
+		let message: String
+	}
+
 	// MARK: WebSocket live stream
 
 	/// Opens a Signal K live WebSocket stream, managing the underlying client
