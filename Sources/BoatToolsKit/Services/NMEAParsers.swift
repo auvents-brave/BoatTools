@@ -1194,19 +1194,21 @@ internal enum NMEA2000Decoder {
 		guard let routeNameLength = lauLength(d, 9) else { return out.isEmpty ? nil : out }
 		var cursor = 9 + routeNameLength + 1  // + one reserved byte
 		let total = min(Int(na(count) ? 0 : count), 64)  // cap the repeat
-		for index in 0..<total {
+		for _ in 0..<total {
 			guard let wpId = u16(d, cursor) else { break }
 			cursor += 2
 			guard let nameLength = lauLength(d, cursor) else { break }
 			cursor += nameLength
 			guard let lat = i32(d, cursor), let lon = i32(d, cursor + 4) else { break }
 			cursor += 8
-			if !na(wpId) { out.append(.init(name: "route.waypoint.\(index).id", value: Double(wpId))) }
+			// Keyed by waypoint id so the position joins the name the store puts in
+			// `labels["route.waypoint.<id>"]` (see BoatMetricStore.feed 129285).
+			guard !na(wpId) else { continue }
 			if !na(lat) {
-				out.append(.init(name: "route.waypoint.\(index).latitude", value: Double(lat) * 1e-7, unit: "°"))
+				out.append(.init(name: "route.waypoint.\(wpId).latitude", value: Double(lat) * 1e-7, unit: "°"))
 			}
 			if !na(lon) {
-				out.append(.init(name: "route.waypoint.\(index).longitude", value: Double(lon) * 1e-7, unit: "°"))
+				out.append(.init(name: "route.waypoint.\(wpId).longitude", value: Double(lon) * 1e-7, unit: "°"))
 			}
 		}
 		return out.isEmpty ? nil : out

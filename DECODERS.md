@@ -258,7 +258,7 @@ Victron battery monitors report over these **standard** PGNs (127506 DC Detailed
 |---|---|---|
 | `127233` | Man Overboard Notification | `mob.emitterId`, `mob.status`, `mob.latitude`, `mob.longitude`, `mob.cog`, `mob.sog`, `mob.mmsi` — a MOB device heard on the bus (distinct from own-ship MOB mode) |
 | `129808` | DSC Call Information | `dsc.format`, `dsc.category`, `dsc.mmsi` (caller), `dsc.lat`, `dsc.lon`, `dsc.distressMMSI` — the same `dsc.*` metrics the NMEA 0183 `$--DSC` path emits (position read past the variable telephone-number field) |
-| `129285` | Navigation Route/WP Information | `route.id`, `route.waypointCount`, and per waypoint `route.waypoint.<i>.id` / `.latitude` / `.longitude` (each variable name is stepped over; names themselves are strings, not numeric metrics) |
+| `129285` | Navigation Route/WP Information | `route.id`, `route.waypointCount`, and per waypoint `route.waypoint.<id>.latitude` / `.longitude` (metrics). The **names** travel the labels side channel: `labels["route"]` (route name) and `labels["route.waypoint.<id>"]` (every waypoint name) — keyed by the same waypoint id, so each name joins its position |
 | `65284` | BEP Marine — CZone Circuit Status | `czone.<module>.circuits` (32-bit circuit on/off bitmap, LSB = circuit 0) — proprietary, decoded only when the manufacturer field is BEP Marine (295) |
 
 ### Network device information
