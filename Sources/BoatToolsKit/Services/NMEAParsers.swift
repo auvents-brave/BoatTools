@@ -1078,7 +1078,7 @@ internal enum NMEA2000Decoder {
 	/// Well-known NMEA 2000 fast-packet PGNs (per Canboat reference).
 	private static let fastPacketPGNs: Set<UInt32> = [
 		126208, 126464, 126996, 126998,
-		127237, 127489, 127496, 127497, 127498,
+		127233, 127237, 127489, 127496, 127497, 127498, 127513,
 		128275,
 		129029, 129038, 129039, 129040, 129041,
 		129283, 129284, 129285,
@@ -1101,6 +1101,9 @@ internal enum NMEA2000Decoder {
 		129798,  // SAR Aircraft Position Report (msg type 9)
 		129809,  // Class B "CS" Static Data Report, Part A (msg type 24A)
 		129810,  // Class B "CS" Static Data Report, Part B (msg type 24B)
+		129797,  // Binary Broadcast Message (msg type 8)
+		129801,  // Addressed Safety Related Message (msg type 12)
+		129802,  // Safety Related Broadcast Message (msg type 14)
 	]
 
 	/// Decodes PGNs that emit composite ``NMEAFrame`` values alongside metrics.
@@ -1167,8 +1170,136 @@ internal enum NMEA2000Decoder {
 		case 65345: return seatalkWindDatum(data)
 		case 65360: return seatalkTargetHeading(data)
 		case 65379: return seatalkPilotMode(data)
+		case 65284: return czoneCircuitStatus(data)
+		case 127233: return mobNotification(data)
+		case 127237: return headingTrackControl(data)
+		case 127513: return batteryConfiguration(data)
+		case 129808: return dscCallInformation(data)
+		case 129285: return routeInformation(data)
 		default: return nil
 		}
+	}
+
+	// 129285 — Navigation Route/WP Information: the active route's size and id.
+	//   nItems u16@2, routeId u16@6. Waypoint names/positions follow a variable
+	//   STRING_LAU and a repeat block, so they are not extracted here.
+	private static func routeInformation(_ d: [UInt8]) -> [BoatMetric]? {
+		guard d.count >= 8 else { return nil }
+		var out: [BoatMetric] = []
+		if let count = u16(d, 2), !na(count) {
+			out.append(.init(name: "route.waypointCount", value: Double(count)))
+		}
+		if let routeId = u16(d, 6), !na(routeId) {
+			out.append(.init(name: "route.id", value: Double(routeId)))
+		}
+		return out.isEmpty ? nil : out
+	}
+
+	// MARK: MOB / DSC / pilot state / battery config / CZone
+
+	// 127233 — Man Overboard Notification (received from a MOB device on the bus).
+	//   emitterId u32@1, status 3b@5, lat i32@17, lon i32@21, COG u16@26, SOG
+	//   u16@28, MMSI u32@30 (all little-endian, angles 1e-4 rad, speed 0.01 m/s).
+	private static func mobNotification(_ d: [UInt8]) -> [BoatMetric]? {
+		guard d.count >= 25 else { return nil }
+		var out: [BoatMetric] = []
+		if let emitter = u32(d, 1), !na(emitter) {
+			out.append(.init(name: "mob.emitterId", value: Double(emitter)))
+		}
+		if let status = u8(d, 5) {
+			out.append(.init(name: "mob.status", value: Double(status & 0x07)))
+		}
+		if let lat = i32(d, 17), !na(lat) {
+			out.append(.init(name: "mob.latitude", value: Double(lat) * 1e-7, unit: "°"))
+		}
+		if let lon = i32(d, 21), !na(lon) {
+			out.append(.init(name: "mob.longitude", value: Double(lon) * 1e-7, unit: "°"))
+		}
+		if d.count >= 28, let cog = u16(d, 26), !na(cog) {
+			out.append(.init(name: "mob.cog", value: Double(cog) * 1e-4 * 180 / .pi, unit: "°"))
+		}
+		if d.count >= 30, let sog = u16(d, 28), !na(sog) {
+			out.append(.init(name: "mob.sog", value: Double(sog) * 0.01 * 1.94384, unit: "kn"))
+		}
+		if d.count >= 34, let mmsi = u32(d, 30), !na(mmsi), mmsi != 0 {
+			out.append(.init(name: "mob.mmsi", value: Double(mmsi)))
+		}
+		return out.isEmpty ? nil : out
+	}
+
+	// 127237 — Heading/Track Control: the autopilot's steering state.
+	//   byte1 low 3 bits = steering mode; commandedRudder i16@3 (1e-4 rad);
+	//   heading-to-steer u16@5 (1e-4 rad).
+	private static func headingTrackControl(_ d: [UInt8]) -> [BoatMetric]? {
+		guard d.count >= 7 else { return nil }
+		var out: [BoatMetric] = []
+		if let modeByte = u8(d, 1) {
+			out.append(.init(name: "autopilot.steeringMode", value: Double(modeByte & 0x07)))
+		}
+		if let rudder = i16(d, 3), !na(rudder) {
+			out.append(
+				.init(name: "autopilot.commandedRudder", value: Double(rudder) * 1e-4 * 180 / .pi, unit: "°"))
+		}
+		if let hts = u16(d, 5), !na(hts) {
+			out.append(
+				.init(name: "navigation.headingToSteer", value: Double(hts) * 1e-4 * 180 / .pi, unit: "°"))
+		}
+		return out.isEmpty ? nil : out
+	}
+
+	// 127513 — Battery Configuration Status (nominal voltage + capacity; the
+	//   config half Victron BMV/SmartShunt and others broadcast).
+	//   instance u8@0, byte2 low nibble = nominal-voltage lookup, capacity u16@3 (Ah).
+	private static func batteryConfiguration(_ d: [UInt8]) -> [BoatMetric]? {
+		guard let inst = u8(d, 0), d.count >= 5 else { return nil }
+		var out: [BoatMetric] = []
+		if let voltageByte = u8(d, 2) {
+			let nominal = [6.0, 12, 24, 32, 36, 42, 48]
+			let index = Int(voltageByte & 0x0F)
+			if index < nominal.count {
+				out.append(.init(name: "battery.\(inst).nominalVoltage", value: nominal[index], unit: "V"))
+			}
+		}
+		if let capacity = u16(d, 3), !na(capacity) {
+			out.append(.init(name: "battery.\(inst).capacityAh", value: Double(capacity), unit: "Ah"))
+		}
+		return out.isEmpty ? nil : out
+	}
+
+	// 129808 — DSC Call Information (received): decode the leading fixed fields
+	//   into the same `dsc.*` metrics the NMEA 0183 `$--DSC` path emits, so a DSC
+	//   call heard over N2K is classified alongside the 0183 one. Position lives
+	//   past a variable string field, so only format / category / caller MMSI are
+	//   taken (enough for distress classification).
+	private static func dscCallInformation(_ d: [UInt8]) -> [BoatMetric]? {
+		guard d.count >= 7, let format = u8(d, 0), let category = u8(d, 1) else { return nil }
+		var out: [BoatMetric] = [.init(name: "dsc.format", value: Double(format))]
+		if category != 0xFF { out.append(.init(name: "dsc.category", value: Double(category))) }
+		// DSC address: five bytes, each a two-digit group (MS first). A ship MMSI
+		// is the 10-digit address without its trailing 0.
+		var address: UInt64 = 0
+		var valid = true
+		for index in 2..<7 {
+			let byte = d[index]
+			if byte == 0xFF || byte > 99 {
+				valid = false
+				break
+			}
+			address = address * 100 + UInt64(byte)
+		}
+		if valid, address > 0 { out.append(.init(name: "dsc.mmsi", value: Double(address / 10))) }
+		return out
+	}
+
+	// 65284 — BEP Marine CZone Circuit Status (digital switching). Proprietary
+	//   single frame; decode only when the manufacturer field is BEP Marine (295).
+	//   dipswitch@2 = module id, bitmap@4 (32 bits, LSB = circuit 0 ON).
+	private static func czoneCircuitStatus(_ d: [UInt8]) -> [BoatMetric]? {
+		guard d.count >= 8 else { return nil }
+		let header = UInt16(d[0]) | UInt16(d[1]) << 8
+		guard header & 0x07FF == 295 else { return nil }  // BEP Marine 2
+		guard let bitmap = u32(d, 4) else { return nil }
+		return [.init(name: "czone.\(d[2]).circuits", value: Double(bitmap))]
 	}
 
 	// MARK: Autopilot status (Raymarine Seatalk NG)
