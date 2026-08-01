@@ -1180,17 +1180,34 @@ internal enum NMEA2000Decoder {
 		}
 	}
 
-	// 129285 — Navigation Route/WP Information: the active route's size and id.
-	//   nItems u16@2, routeId u16@6. Waypoint names/positions follow a variable
-	//   STRING_LAU and a repeat block, so they are not extracted here.
+	// 129285 — Navigation Route/WP Information: id/size plus every waypoint's id
+	//   and position. Fixed head: startRps@0, nItems@2, databaseId@4, routeId@6,
+	//   flags@8; then route-name STRING_LAU@9, one reserved byte, then a repeat of
+	//   { wpId u16, wpName STRING_LAU, wpLat i32, wpLon i32 } — each variable name
+	//   is stepped over to reach the positions. Names are strings and don't fit
+	//   the numeric store, so they're not emitted.
 	private static func routeInformation(_ d: [UInt8]) -> [BoatMetric]? {
-		guard d.count >= 8 else { return nil }
+		guard d.count >= 9, let count = u16(d, 2), let routeId = u16(d, 6) else { return nil }
 		var out: [BoatMetric] = []
-		if let count = u16(d, 2), !na(count) {
-			out.append(.init(name: "route.waypointCount", value: Double(count)))
-		}
-		if let routeId = u16(d, 6), !na(routeId) {
-			out.append(.init(name: "route.id", value: Double(routeId)))
+		if !na(count) { out.append(.init(name: "route.waypointCount", value: Double(count))) }
+		if !na(routeId) { out.append(.init(name: "route.id", value: Double(routeId))) }
+		guard let routeNameLength = lauLength(d, 9) else { return out.isEmpty ? nil : out }
+		var cursor = 9 + routeNameLength + 1  // + one reserved byte
+		let total = min(Int(na(count) ? 0 : count), 64)  // cap the repeat
+		for index in 0..<total {
+			guard let wpId = u16(d, cursor) else { break }
+			cursor += 2
+			guard let nameLength = lauLength(d, cursor) else { break }
+			cursor += nameLength
+			guard let lat = i32(d, cursor), let lon = i32(d, cursor + 4) else { break }
+			cursor += 8
+			if !na(wpId) { out.append(.init(name: "route.waypoint.\(index).id", value: Double(wpId))) }
+			if !na(lat) {
+				out.append(.init(name: "route.waypoint.\(index).latitude", value: Double(lat) * 1e-7, unit: "°"))
+			}
+			if !na(lon) {
+				out.append(.init(name: "route.waypoint.\(index).longitude", value: Double(lon) * 1e-7, unit: "°"))
+			}
 		}
 		return out.isEmpty ? nil : out
 	}
@@ -1266,29 +1283,43 @@ internal enum NMEA2000Decoder {
 		return out.isEmpty ? nil : out
 	}
 
-	// 129808 — DSC Call Information (received): decode the leading fixed fields
-	//   into the same `dsc.*` metrics the NMEA 0183 `$--DSC` path emits, so a DSC
-	//   call heard over N2K is classified alongside the 0183 one. Position lives
-	//   past a variable string field, so only format / category / caller MMSI are
-	//   taken (enough for distress classification).
+	// 129808 — DSC Call Information (received): decode into the same `dsc.*`
+	//   metrics the NMEA 0183 `$--DSC` path emits, so a DSC call heard over N2K is
+	//   classified alongside the 0183 one. Fixed fields: format@0, category@1,
+	//   address@2-6, telecommands@7-8, proposed Rx/Tx channels@9-20, then a
+	//   variable telephone STRING_LAU — stepped over to reach the reported
+	//   position and the MMSI of the ship in distress.
 	private static func dscCallInformation(_ d: [UInt8]) -> [BoatMetric]? {
 		guard d.count >= 7, let format = u8(d, 0), let category = u8(d, 1) else { return nil }
 		var out: [BoatMetric] = [.init(name: "dsc.format", value: Double(format))]
 		if category != 0xFF { out.append(.init(name: "dsc.category", value: Double(category))) }
-		// DSC address: five bytes, each a two-digit group (MS first). A ship MMSI
-		// is the 10-digit address without its trailing 0.
-		var address: UInt64 = 0
-		var valid = true
-		for index in 2..<7 {
-			let byte = d[index]
-			if byte == 0xFF || byte > 99 {
-				valid = false
-				break
-			}
-			address = address * 100 + UInt64(byte)
+		if let caller = dscAddress(d, at: 2) { out.append(.init(name: "dsc.mmsi", value: Double(caller))) }
+		// Step over the telephone STRING_LAU (at byte 21) to the position block.
+		guard let phoneLength = lauLength(d, 21) else { return out }
+		let positionAt = 21 + phoneLength
+		if let lat = i32(d, positionAt), !na(lat), let lon = i32(d, positionAt + 4), !na(lon) {
+			out.append(.init(name: "dsc.lat", value: Double(lat) * 1e-7, unit: "°"))
+			out.append(.init(name: "dsc.lon", value: Double(lon) * 1e-7, unit: "°"))
 		}
-		if valid, address > 0 { out.append(.init(name: "dsc.mmsi", value: Double(address / 10))) }
+		// After lat(4) + lon(4) + time-of-position(4): MMSI of the ship in distress.
+		if let distress = dscAddress(d, at: positionAt + 12) {
+			out.append(.init(name: "dsc.distressMMSI", value: Double(distress)))
+		}
 		return out
+	}
+
+	/// A DSC decimal address (five bytes, each a two-digit group most-significant
+	/// first) as a 9-digit MMSI — the 10-digit address without its trailing 0.
+	/// `nil` when absent (0xFF padding) or out of range.
+	private static func dscAddress(_ d: [UInt8], at: Int) -> UInt64? {
+		guard at + 5 <= d.count else { return nil }
+		var value: UInt64 = 0
+		for index in at..<at + 5 {
+			let byte = d[index]
+			if byte == 0xFF || byte > 99 { return nil }
+			value = value * 100 + UInt64(byte)
+		}
+		return value > 0 ? value / 10 : nil
 	}
 
 	// 65284 — BEP Marine CZone Circuit Status (digital switching). Proprietary
@@ -1359,6 +1390,17 @@ internal enum NMEA2000Decoder {
 	// MARK: Byte readers
 
 	private static func u8(_ d: [UInt8], _ at: Int) -> UInt8? { at < d.count ? d[at] : nil }
+
+	/// The byte length of a STRING_LAU field at `at` — its first byte is the total
+	/// field length (that length byte + a 1-byte encoding + the characters). Used
+	/// to step over a variable string and reach the fixed fields that follow.
+	/// `nil` when the length is degenerate or runs off the end.
+	private static func lauLength(_ d: [UInt8], _ at: Int) -> Int? {
+		guard at < d.count else { return nil }
+		let length = Int(d[at])
+		guard length >= 2, at + length <= d.count else { return nil }
+		return length
+	}
 	private static func u16(_ d: [UInt8], _ at: Int) -> UInt16? {
 		guard at + 1 < d.count else { return nil }
 		return UInt16(d[at]) | UInt16(d[at + 1]) << 8
