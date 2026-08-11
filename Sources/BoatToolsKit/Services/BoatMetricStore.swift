@@ -743,6 +743,11 @@ public final class BoatMetricStore {
 			} else if pgn == 129_285, let info = NMEA2000Decoder.routeInfo(data) {
 				if let route = info.route, labels["route"] != route { labels["route"] = route }
 				routeWaypointNames.merge(info.waypoints) { _, new in new }
+				// Expose every waypoint's name (not only the active one), keyed to
+				// match the numeric positions `route.waypoint.<id>.latitude/.longitude`.
+				for (id, name) in info.waypoints where labels["route.waypoint.\(id)"] != name {
+					labels["route.waypoint.\(id)"] = name
+				}
 				resolveWaypointLabel()
 			}
 

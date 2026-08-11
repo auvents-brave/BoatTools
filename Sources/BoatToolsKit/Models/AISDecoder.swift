@@ -654,6 +654,9 @@ internal enum AISDecoder {
 		case 129794: return decodeN2KStaticA(data)
 		case 129809: return decodeN2KStaticB_PartA(data)
 		case 129810: return decodeN2KStaticB_PartB(data)
+		case 129797: return decodeN2KBinaryBroadcast(data)
+		case 129801: return decodeN2KAddressedSafety(data)
+		case 129802: return decodeN2KSafetyBroadcast(data)
 		default: return nil
 		}
 	}
@@ -821,6 +824,31 @@ internal enum AISDecoder {
 			positionAccuracy: false, raim: false,
 			callsign: cs,
 			shipType: ShipType(rawValue: shipTypeRaw))
+	}
+
+	/// PGN 129797 — AIS Binary Broadcast Message (type 8). Source MMSI at byte 1;
+	/// the binary payload is not interpreted (kept as a notable event).
+	private static func decodeN2KBinaryBroadcast(_ d: [UInt8]) -> AISTarget? {
+		guard d.count >= 5 else { return nil }
+		return AISTarget(mmsi: Int(n2kU32(d, 1)), messageType: .binaryBroadcastMessage, channel: "A")
+	}
+
+	/// PGN 129801 — AIS Addressed Safety Related Message (type 12). Source MMSI at
+	/// byte 1, destination MMSI at byte 6, safety text (STRING_LAU) at byte 11.
+	private static func decodeN2KAddressedSafety(_ d: [UInt8]) -> AISTarget? {
+		guard d.count >= 11 else { return nil }
+		return AISTarget(
+			mmsi: Int(n2kU32(d, 1)), messageType: .addressedSafetyMessage, channel: "A",
+			text: n2kStringLAU(d, at: 11))
+	}
+
+	/// PGN 129802 — AIS Safety Related Broadcast Message (type 14). Source MMSI at
+	/// byte 1, safety text (STRING_LAU) at byte 6.
+	private static func decodeN2KSafetyBroadcast(_ d: [UInt8]) -> AISTarget? {
+		guard d.count >= 6 else { return nil }
+		return AISTarget(
+			mmsi: Int(n2kU32(d, 1)), messageType: .safetyBroadcastMessage, channel: "A",
+			text: n2kStringLAU(d, at: 6))
 	}
 
 	// MARK: NMEA 2000 byte-reading helpers

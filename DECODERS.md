@@ -190,6 +190,7 @@ PGNs larger than 8 bytes (fast-packet) are reassembled across multiple CAN frame
 | `65345` | Seatalk: Pilot Wind Datum (Raymarine) | `autopilot.windDatum` (target wind angle, signed, negative to port) |
 | `65360` | Seatalk: Target Heading (Raymarine) | `autopilot.target`, `autopilot.target.magnetic` |
 | `65379` | Seatalk: Pilot Mode (Raymarine) | `autopilot.mode` (0 standby, 1 auto, 2 wind, 3 track) |
+| `127237` | Heading/Track Control | `autopilot.steeringMode`, `autopilot.commandedRudder`, `navigation.headingToSteer` (course to steer) |
 
 ### Water
 
@@ -223,6 +224,9 @@ PGNs larger than 8 bytes (fast-packet) are reassembled across multiple CAN frame
 | `127489` | Engine Parameters, Dynamic | `engine.<inst>.{oilPressure, oilTemperature, coolantTemperature, alternatorVoltage, fuelRate, runtime, coolantPressure, fuelPressure, load, torque}` |
 | `127505` | Fluid Level | `<type>.<inst>.level`, `<type>.<inst>.capacity` (type ∈ fuel / water / graywater / livewell / oil / blackwater) |
 | `127508` | Battery Status | `battery.<inst>.voltage`, `.current`, `.temperature` |
+| `127513` | Battery Configuration Status | `battery.<inst>.nominalVoltage`, `.capacityAh` — the config half Victron BMV / SmartShunt (and others) broadcast alongside 127506/127508 |
+
+Victron battery monitors report over these **standard** PGNs (127506 DC Detailed Status, 127508 Battery Status, 127513 Battery Configuration) — no proprietary decoder is required.
 
 ### Anchor windlass
 
@@ -244,6 +248,18 @@ PGNs larger than 8 bytes (fast-packet) are reassembled across multiple CAN frame
 | `129794` | AIS Class A Static and Voyage Data | 5 |
 | `129809` | AIS Class B "CS" Static Data, Part A | 24A |
 | `129810` | AIS Class B "CS" Static Data, Part B | 24B |
+| `129797` | AIS Binary Broadcast Message | 8 |
+| `129801` | AIS Addressed Safety Related Message | 12 (+ safety text) |
+| `129802` | AIS Safety Related Broadcast Message | 14 (+ safety text) |
+
+### Safety, distress and digital switching
+
+| PGN | Name | Metrics / decoded fields |
+|---|---|---|
+| `127233` | Man Overboard Notification | `mob.emitterId`, `mob.status`, `mob.latitude`, `mob.longitude`, `mob.cog`, `mob.sog`, `mob.mmsi` — a MOB device heard on the bus (distinct from own-ship MOB mode) |
+| `129808` | DSC Call Information | `dsc.format`, `dsc.category`, `dsc.mmsi` (caller), `dsc.lat`, `dsc.lon`, `dsc.distressMMSI` — the same `dsc.*` metrics the NMEA 0183 `$--DSC` path emits (position read past the variable telephone-number field) |
+| `129285` | Navigation Route/WP Information | `route.id`, `route.waypointCount`, and per waypoint `route.waypoint.<id>.latitude` / `.longitude` (metrics). The **names** travel the labels side channel: `labels["route"]` (route name) and `labels["route.waypoint.<id>"]` (every waypoint name) — keyed by the same waypoint id, so each name joins its position |
+| `65284` | BEP Marine — CZone Circuit Status | `czone.<module>.circuits` (32-bit circuit on/off bitmap, LSB = circuit 0) — proprietary, decoded only when the manufacturer field is BEP Marine (295) |
 
 ### Network device information
 
