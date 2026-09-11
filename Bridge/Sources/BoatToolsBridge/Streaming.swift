@@ -25,7 +25,10 @@ struct AisPayload: Encodable {
 	let lat: Double
 	let lon: Double
 	let heading: Double?
+	let cog: Double?
 	let sog: Double?
+	/// Rate of turn, in degrees per minute.
+	let rot: Double?
 	let name: String?
 	let kind: String
 	let stale: Bool
@@ -208,7 +211,9 @@ final class BridgeConnection: Sendable {
 					mmsi: entry.target.mmsi,
 					lat: lat, lon: lon,
 					heading: heading,
+					cog: entry.target.courseOverGround,
 					sog: entry.target.speedOverGround,
+					rot: entry.target.rateOfTurn.map(Double.init),
 					name: entry.target.shipName,
 					kind: Self.kind(for: entry.target),
 					stale: now.timeIntervalSince(entry.seen) > 600
