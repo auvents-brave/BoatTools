@@ -4,7 +4,7 @@ Swift CLI tools to explore sailboat data sources, in **strict concurrency mode**
 
 The package ships two products:
 
-- **`BoatToolsKit`** — library, multiplatform. All the business logic: NMEA / Signal K / Victron VRM clients, parsers, Bonjour discovery, on-device sensors (Apple CoreLocation/CoreMotion directly, or host-pushed on Android / Windows), and lookups against public services — WMO for GMDSS forecasts, Wikimedia for vessel photographs.
+- **`BoatToolsKit`** — library, multiplatform. All the business logic: NMEA / Signal K / Victron VRM clients, parsers, Bonjour discovery, on-device sensors on every platform (read directly on Apple, pushed in by the host app elsewhere), offline sunrise / solar noon / sunset, and lookups against public services — WMO for GMDSS forecasts, Wikimedia for vessel photographs.
 - **`boattools`** — executable, ArgumentParser-based CLI on top of the library. Nine subcommands: `connect`, `devices`, `pilot`, `windlass`, `file`, `vrm`, `discover`, `gmdss`, `simulate`. The device-sensor fallback is a `BoatToolsKit` feature only — it is not exposed by the CLI.
 
 A third piece lives in the nested [`Bridge/`](Bridge) package:
@@ -14,8 +14,8 @@ every kind the app offers (TCP, UDP, a URL for Signal K over `ws`/`http`,
 Victron VRM, a recorded log replayed from disk, and a parametrable synthetic
 passage — all polled), a connection test that waits for the first data, a
 host-pushed device-sensor feed (position, heading, barometric pressure — for
-Android / Windows hosts that read their own hardware and push it in), AIS
-target details, Wikimedia vessel photographs, GMDSS forecasts, the NMEA 2000
+Android, Windows and Linux hosts that read their own hardware and push it in),
+AIS target details, Wikimedia vessel photographs, GMDSS forecasts, sun times, the NMEA 2000
 device inventory with an ISO Request roll call, and autopilot / windlass
 commands — so non-Swift hosts (C# via P/Invoke, Python via
 ctypes…) reuse the same decoding, transports and commands instead of
@@ -188,11 +188,22 @@ frames to the clients and the metric store and let them dispatch.
 - `NMEA2000DeviceDirectory` / `NMEA2000Device` — inventory of the devices on the NMEA 2000 network, accumulated from the device-information PGNs (60928 address claims, 126996 product information, 126998 configuration information, 126464 PGN lists, 126993 heartbeats): manufacturer, model, serial, versions, class / function, instances, load equivalency, PGN lists, last seen. `interrogationLines(destination:)` yields the ISO Requests (YD RAW transmit format) that make every device announce itself.
 - `ConnectionOwnershipManager` — AppGroup-backed primary / secondary election so several processes (e.g. main app + widget) can share one upstream connection.
 
-**Device sensors** — the phone/laptop's own GPS, compass and barometer, as a fallback when the boat's network has nothing.
-- `DeviceSensors` — Apple-only (CoreLocation + CoreMotion), emitting `BoatMetric` for `lat`, `lon`, `SOG`, `COG`, `HDG.*`, `pressure.atmospheric`.
+**Device sensors** — the phone/laptop's own GPS, compass and barometer, as a fallback when the boat's network has nothing. Supported on every platform, through two entry points that emit the **same** canonical metrics (`lat`, `lon`, `SOG`, `COG`, `HDG.*`, `magneticVariation`, `pressure.atmospheric`), so downstream code never knows which one fed it:
+
+| Platform | Entry point | What reads the hardware |
+| --- | --- | --- |
+| iOS, iPadOS, macOS, watchOS, visionOS | `DeviceSensors` | BoatToolsKit itself — CoreLocation + CoreMotion |
+| Android | `ExternalSensorFeed` | the host app — Android location, compass, barometer |
+| Windows | `ExternalSensorFeed` | the host app — Windows.Devices location, compass, barometer |
+| Linux | `ExternalSensorFeed` | the host app — gpsd (position, and heading when a compass is behind it) |
+
+- `DeviceSensors` — Apple platforms, where Swift reads the sensors directly.
 - `DeviceSensorsConfig` — sensor-selection and accuracy knobs (`DeviceSensors`).
-- `DeviceFallback` (with `DeviceFallback.Config`) — Apple-only; watches the store and starts `DeviceSensors` only while a given metric (position, heading, pressure) is missing or stale, automatically standing down when network data returns.
-- `ExternalSensorFeed` — the Android / Windows equivalent: Swift cannot read those platforms' hardware directly, so the **host** reads its own GPS/compass/barometer APIs and pushes readings in — `pushLocation(latitude:longitude:altitudeMetres:speedMetresPerSecond:courseDegrees:timestamp:)`, `pushHeading(magneticDegrees:trueDegrees:timestamp:)` (also derives `magneticVariation` when both headings are given), `pushPressure(hectopascals:timestamp:)` — turning them into the exact same canonical metrics `DeviceSensors` emits, so downstream code stays platform-blind. Thread-safe (push from any thread); `stream()` yields the canonical `BoatMetric`s. This is what the bridge's `boattools_bridge_open_device_feed` / `_push_location` / `_push_heading` / `_push_pressure` wrap for non-Swift hosts (e.g. ThoosaUno's C# `DeviceSensorsService` on Android and Windows).
+- `DeviceFallback` (with `DeviceFallback.Config`) — Apple platforms; watches the store and starts `DeviceSensors` only while a given metric (position, heading, pressure) is missing or stale, automatically standing down when network data returns.
+- `ExternalSensorFeed` — every other platform: Swift cannot reach their sensor APIs, so the **host** reads its own GPS/compass/barometer and pushes readings in — `pushLocation(latitude:longitude:altitudeMetres:speedMetresPerSecond:courseDegrees:timestamp:)`, `pushHeading(magneticDegrees:trueDegrees:timestamp:)` (also derives `magneticVariation` when both headings are given), `pushPressure(hectopascals:timestamp:)` — turning them into the exact same canonical metrics `DeviceSensors` emits, so downstream code stays platform-blind. Thread-safe (push from any thread); `stream()` yields the canonical `BoatMetric`s. This is what the bridge's `boattools_bridge_open_device_feed` / `_push_location` / `_push_heading` / `_push_pressure` wrap for non-Swift hosts (e.g. ThoosaUno's C# `DeviceSensorsService` on Android, Windows and Linux).
+
+**Sun** — offline, no network, the same minutes on every platform.
+- `SunTimes` — sunrise, solar noon and sunset of a local day at a position (NOAA solar calculator algorithm, about a minute's accuracy up to ±72° latitude); `Horizon` selects the official events or civil / nautical / astronomical dawn and dusk; `polar` reports a day when the Sun neither rises nor sets. The bridge exposes it as `boattools_bridge_sun_times`.
 
 **Parsing** — most parsers are internal. The one exposed type:
 - `NMEA0183Parser` — stateless sentence parser used by the CLI to filter decoded vs unknown sentence types. NMEA 2000, AIS, SeaSmart, Canboat, iKonvert and YD RAW decoders are reached indirectly through `NMEATransport`. Full decoder coverage in [`DECODERS.md`](DECODERS.md).
