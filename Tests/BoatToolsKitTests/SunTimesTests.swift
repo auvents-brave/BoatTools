@@ -110,3 +110,28 @@ private func `Sunrise, solar noon and sunset match the reference`(_ reference: C
 		#expect(times.solarNoon.timeIntervalSince1970.isFinite)
 	}
 }
+
+@Test func `Upcoming events are the next of each kind, soonest first`() {
+	// Monaco, 21 June at 15:00 local: noon has passed, so it comes tomorrow.
+	let events = SunTimes.upcoming(latitude: 43.7384, longitude: 7.4246, after: instant("2026-06-21T15:00:00+02:00"))
+
+	#expect(events.map(\.kind) == [.sunset, .sunrise, .solarNoon])
+	expectClose(events[0].date, "2026-06-21T21:15:29+02:00")
+	#expect(abs(events[1].date.timeIntervalSince(instant("2026-06-22T05:48:45+02:00"))) < 120)
+	#expect(abs(events[2].date.timeIntervalSince(instant("2026-06-22T13:32:01+02:00"))) < 120)
+}
+
+@Test func `Upcoming events work across the date line`() {
+	// Auckland just before local midnight: all three are the next day's.
+	let now = instant("2026-03-20T23:30:00+13:00")
+	let events = SunTimes.upcoming(latitude: -36.8485, longitude: 174.7633, after: now)
+
+	#expect(events.map(\.kind) == [.sunrise, .solarNoon, .sunset])
+	#expect(events.allSatisfy { $0.date > now && $0.date.timeIntervalSince(now) < 86400 })
+}
+
+@Test func `A polar day has only a solar noon ahead`() {
+	let events = SunTimes.upcoming(latitude: 69.6492, longitude: 18.9553, after: instant("2026-06-21T12:00:00+02:00"))
+
+	#expect(events.map(\.kind) == [.solarNoon])
+}

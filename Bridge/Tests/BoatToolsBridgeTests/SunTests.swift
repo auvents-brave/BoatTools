@@ -44,4 +44,19 @@ struct SunTests {
 		#expect(try #require(nautical.sunrise) < (try #require(official.sunrise)) - 3000)
 		#expect(unknown.sunrise == official.sunrise)
 	}
+
+	@Test("Upcoming events come soonest first, one of each kind")
+	func upcoming() throws {
+		struct Event: Decodable {
+			let kind: String
+			let time: Double
+		}
+		let now = try #require(ISO8601DateFormatter().date(from: "2026-06-21T13:00:00Z")).timeIntervalSince1970
+		let pointer = try #require(boattools_bridge_sun_upcoming(43.7384, 7.4246, now))
+		defer { boattools_bridge_string_free(pointer) }
+		let events = try JSONDecoder().decode([Event].self, from: Data(String(cString: pointer).utf8))
+
+		#expect(events.map(\.kind) == ["sunset", "sunrise", "solarNoon"])
+		#expect(events.allSatisfy { $0.time > now })
+	}
 }

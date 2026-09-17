@@ -152,3 +152,56 @@ public struct SunTimes: Sendable, Equatable {
 		return (declination, 4 * equation / radians)
 	}
 }
+
+/// One of the Sun's daily events, at the time it happens.
+public struct SunEvent: Sendable, Equatable {
+	/// Which event.
+	public enum Kind: String, Sendable, CaseIterable {
+		/// The upper limb clearing the horizon.
+		case sunrise
+		/// The Sun at its highest.
+		case solarNoon
+		/// The upper limb dropping below the horizon.
+		case sunset
+	}
+
+	/// Which event this is.
+	public let kind: Kind
+	/// When it happens.
+	public let date: Date
+
+	/// Creates an event.
+	public init(kind: Kind, date: Date) {
+		self.kind = kind
+		self.date = date
+	}
+}
+
+extension SunTimes {
+	/// The next sunrise, solar noon and sunset after `date`, soonest first —
+	/// what a sailor looks ahead to. An event the Sun does not make within
+	/// two days (a polar day or night) is left out.
+	/// - Parameters:
+	///   - latitude: Degrees, north positive.
+	///   - longitude: Degrees, east positive.
+	///   - date: The moment to look ahead from, usually now.
+	/// - Returns: Up to three events, one of each kind, in chronological order.
+	public static func upcoming(latitude: Double, longitude: Double, after date: Date) -> [SunEvent] {
+		// UTC days either side cover every longitude: a day's events all fall
+		// within twelve hours of its solar noon.
+		let candidates = (-1...2).flatMap { offset -> [SunEvent] in
+			let times = SunTimes(
+				latitude: latitude, longitude: longitude, day: date.addingTimeInterval(Double(offset) * 86400))
+			return [
+				times.sunrise.map { SunEvent(kind: .sunrise, date: $0) },
+				SunEvent(kind: .solarNoon, date: times.solarNoon),
+				times.sunset.map { SunEvent(kind: .sunset, date: $0) },
+			].compactMap(\.self)
+		}
+		return SunEvent.Kind.allCases
+			.compactMap { kind in
+				candidates.filter { $0.kind == kind && $0.date > date }.min { $0.date < $1.date }
+			}
+			.sorted { $0.date < $1.date }
+	}
+}

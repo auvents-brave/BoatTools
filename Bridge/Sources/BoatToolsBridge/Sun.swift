@@ -43,3 +43,30 @@ public func boattools_bridge_sun_times(
 	guard let data = try? JSONEncoder().encode(payload) else { return cString("{}") }
 	return cString(String(decoding: data, as: UTF8.self))
 }
+
+/// One entry of `boattools_bridge_sun_upcoming`.
+struct SunEventPayload: Encodable {
+	let kind: String
+	let time: Double
+}
+
+/// The next sunrise, solar noon and sunset after an instant, soonest first;
+/// an event the Sun does not make within two days is left out. Instant — no
+/// network.
+/// - Parameters:
+///   - latitude: Degrees, north positive.
+///   - longitude: Degrees, east positive.
+///   - unixSeconds: The moment to look ahead from, usually now.
+/// - Returns: JSON `[{"kind","time"}]` — `kind` `sunrise`, `solarNoon` or
+///   `sunset`, `time` in Unix seconds — to release with
+///   `boattools_bridge_string_free`.
+@_cdecl("boattools_bridge_sun_upcoming")
+public func boattools_bridge_sun_upcoming(
+	_ latitude: Double, _ longitude: Double, _ unixSeconds: Double
+) -> UnsafeMutablePointer<CChar>? {
+	let events = SunTimes.upcoming(
+		latitude: latitude, longitude: longitude, after: Date(timeIntervalSince1970: unixSeconds))
+	let payload = events.map { SunEventPayload(kind: $0.kind.rawValue, time: $0.date.timeIntervalSince1970) }
+	guard let data = try? JSONEncoder().encode(payload) else { return cString("[]") }
+	return cString(String(decoding: data, as: UTF8.self))
+}
