@@ -612,29 +612,27 @@ public final class BoatMetricStore {
 	/// `"NavIC"`, `"GNSS"`. Replaced wholesale on each GSV report.
 	public private(set) var satellites: [String: [SatelliteInfo]] = [:]
 
-	// Wind histories
+	/// Every curve history, fed from the live metrics.
+	public private(set) var histories = MetricHistories()
+
 	/// True wind speed — 5 s / 1 min two-tier history.
-	public private(set) var windTWS = TieredHistory(isAngle: false)
+	public var windTWS: TieredHistory { histories.windTWS }
 	/// True wind direction — circular mean, 5 s / 1 min two-tier history.
-	public private(set) var windTWD = TieredHistory(isAngle: true)
+	public var windTWD: TieredHistory { histories.windTWD }
 	/// Apparent wind speed — 5 s / 1 min two-tier history.
-	public private(set) var windAWS = TieredHistory(isAngle: false)
+	public var windAWS: TieredHistory { histories.windAWS }
 	/// Apparent wind angle — circular mean, 5 s / 1 min two-tier history.
-	public private(set) var windAWA = TieredHistory(isAngle: true)
-
-	// Navigation histories
+	public var windAWA: TieredHistory { histories.windAWA }
 	/// Speed over ground — 5 s / 1 min two-tier history.
-	public private(set) var sog = TieredHistory(isAngle: false)
+	public var sog: TieredHistory { histories.sog }
 	/// Course over ground — circular mean, 5 s / 1 min two-tier history.
-	public private(set) var cog = TieredHistory(isAngle: true)
+	public var cog: TieredHistory { histories.cog }
 	/// Water depth — 5 s / 1 min two-tier history.
-	public private(set) var depthHist = TieredHistory(isAngle: false)
+	public var depthHist: TieredHistory { histories.depth }
 	/// Water temperature — 5 s / 1 min two-tier history.
-	public private(set) var waterTemp = TieredHistory(isAngle: false)
-
-	// Pressure history
+	public var waterTemp: TieredHistory { histories.waterTemp }
 	/// Atmospheric pressure — 30 min samples over 48 hours.
-	public private(set) var pressure = PressureHistory()
+	public var pressure: PressureHistory { histories.pressure }
 
 	// MARK: Private state
 
@@ -937,18 +935,7 @@ public final class BoatMetricStore {
 	}
 
 	private func feedHistory(name: String, value: Double, at now: Date) {
-		switch name {
-		case "TWS": windTWS.add(value, at: now)
-		case "TWD": windTWD.add(value, at: now)
-		case "AWS": windAWS.add(value, at: now)
-		case "AWA": windAWA.add(value, at: now)
-		case "SOG": sog.add(value, at: now)
-		case "COG": cog.add(value, at: now)
-		case "depth": depthHist.add(value, at: now)
-		case "temperature.water": waterTemp.add(value, at: now)
-		case "pressure.atmospheric": pressure.add(value, at: now)
-		default: break
-		}
+		histories.add(name: name, value: value, at: now)
 	}
 
 	/// Pre-fills a metric's curve history with synthetic past samples, so graphs
@@ -974,18 +961,7 @@ public final class BoatMetricStore {
 	/// Empties the history buffer backing a metric, so seeding starts from clean
 	/// axes without doubling up on a reconnect.
 	private func resetHistory(name: String) {
-		switch name {
-		case "TWS": windTWS = TieredHistory(isAngle: false)
-		case "TWD": windTWD = TieredHistory(isAngle: true)
-		case "AWS": windAWS = TieredHistory(isAngle: false)
-		case "AWA": windAWA = TieredHistory(isAngle: true)
-		case "SOG": sog = TieredHistory(isAngle: false)
-		case "COG": cog = TieredHistory(isAngle: true)
-		case "depth": depthHist = TieredHistory(isAngle: false)
-		case "temperature.water": waterTemp = TieredHistory(isAngle: false)
-		case "pressure.atmospheric": pressure = PressureHistory()
-		default: break
-		}
+		histories.reset(name: name)
 	}
 
 	private func mergeAIS(_ incoming: AISTarget, at now: Date) {
