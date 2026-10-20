@@ -318,6 +318,28 @@ internal enum AISDecoder {
 
 	// MARK: Type 1/2/3 — Class A position report
 
+	/// The rate of turn a Class A position report carries, in degrees per minute.
+	///
+	/// ITU-R M.1371 does not send °/min: it sends `4.733 · √(°/min)`, rounded and
+	/// signed, so the resolution is fine around a gentle swing and coarse near a
+	/// hard-over. Squaring it back is what makes the figure comparable with the
+	/// PGN 129038 one, which is already °/min.
+	///
+	/// - Parameter aisRaw: The 8-bit signed field, −128 when the sender has no
+	///   turn information.
+	/// - Returns: Degrees per minute, positive to starboard; ±720 for the
+	///   "turning faster than 5°/30s, no indicator" codes; `nil` when unknown.
+	static func rateOfTurnDegPerMin(aisRaw: Int) -> Int? {
+		switch aisRaw {
+		case -128: return nil  // no turn information available
+		case 127: return 720  // turning right faster than 5°/30s
+		case -127: return -720
+		default:
+			let degPerMin = pow(Double(abs(aisRaw)) / 4.733, 2).rounded()
+			return aisRaw < 0 ? -Int(degPerMin) : Int(degPerMin)
+		}
+	}
+
 	private static func decodeType123(
 		buf: AISBitBuffer,
 		channel: Character,
@@ -342,7 +364,7 @@ internal enum AISDecoder {
 		let cog = cogRaw != 3600 ? Double(cogRaw) / 10.0 : nil
 		// Filter spec-illegal heading values (360..510) along with the N/A sentinel.
 		let heading = (hdg <= 359) ? hdg : nil
-		let rotVal = rot != -128 ? rot : nil
+		let rotVal = rateOfTurnDegPerMin(aisRaw: rot)
 
 		return AISTarget(
 			mmsi: mmsi, messageType: msgType, channel: channel,

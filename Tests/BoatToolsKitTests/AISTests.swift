@@ -300,6 +300,76 @@ struct AISTests {
 		#expect(target.country?.code == "FR")
 	}
 
+	// MARK: Rate of turn
+
+	@Test(
+		arguments: [
+			// (AIS raw field, degrees per minute)
+			(0, 0),  // not turning
+			(-128, nil),  // no turn information
+			(127, 720),  // turning right faster than 5°/30s
+			(-127, -720),
+			(126, 709),  // the fastest rate the scale resolves
+			(-126, -709),
+			(8, 3),  // a gentle swing, where the scale is fine-grained
+			(-8, -3),
+			(37, 61),  // and a brisk one, where it is coarse
+			(-37, -61),
+		] as [(Int, Int?)]
+	)
+	func `A Class A rate of turn comes back in degrees per minute`(raw: Int, degPerMin: Int?) {
+		#expect(AISDecoder.rateOfTurnDegPerMin(aisRaw: raw) == degPerMin)
+	}
+
+	@Test func `The raw field is not the rate, at either end of the scale`() {
+		// ITU-R M.1371 sends 4.733·√(°/min). Read raw, a vessel barely drifting
+		// looks as if it were turning, and a hard-over looks gentle — which is
+		// what this conversion exists to prevent.
+		#expect(AISDecoder.rateOfTurnDegPerMin(aisRaw: 3) == 0)  // raw 3 ≈ 0.4°/min
+		#expect(AISDecoder.rateOfTurnDegPerMin(aisRaw: 126) == 709)  // not 126
+	}
+
+	@Test func `A turning vessel's report decodes to its real rate of turn`() throws {
+		// Raw 26 is a 30°/min turn to starboard, not a 26°/min one.
+		let writer = AISBitWriter.type123(
+			type: 1, mmsi: 227_123_456,
+			navStatus: 0,
+			rotSigned: 26,
+			sogTenthsKn: 100,
+			posAcc: true,
+			lonScaled: Int32((7.0 * 600_000).rounded()),
+			latScaled: Int32((43.5 * 600_000).rounded()),
+			cogTenthsDeg: 900,
+			heading: 85
+		)
+		let (payload, fillBits) = writer.payload()
+		let target = try #require(
+			AISDecoder.decode(payload: payload, fillBits: fillBits, channel: "A")
+		)
+
+		#expect(target.rateOfTurn == 30)
+	}
+
+	@Test func `A vessel with no turn indicator reports no rate of turn`() throws {
+		let writer = AISBitWriter.type123(
+			type: 1, mmsi: 227_123_456,
+			navStatus: 0,
+			rotSigned: -128,
+			sogTenthsKn: 100,
+			posAcc: true,
+			lonScaled: Int32((7.0 * 600_000).rounded()),
+			latScaled: Int32((43.5 * 600_000).rounded()),
+			cogTenthsDeg: 900,
+			heading: 85
+		)
+		let (payload, fillBits) = writer.payload()
+		let target = try #require(
+			AISDecoder.decode(payload: payload, fillBits: fillBits, channel: "A")
+		)
+
+		#expect(target.rateOfTurn == nil)
+	}
+
 	// MARK: Type 5 — Static and voyage data
 
 	@Test func `Type 5 round-trip — name, callsign, IMO, destination, draught`() throws {
