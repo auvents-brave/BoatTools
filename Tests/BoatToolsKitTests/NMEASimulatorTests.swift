@@ -253,6 +253,39 @@ struct NMEASimulatorTests {
 		#expect(vessels.contains { $0.shipName == "CORSICA VICTORIA" })
 	}
 
+	@Test("A turning vessel broadcasts her rate of turn, each way")
+	func emitsTurningAISVessels() async throws {
+		let stream = NMEASimulator.frameStream(
+			route: .monacoToMaddalena, speedKnots: 6, loop: false
+		)
+		let frames = try await framesUntil(ticks: 2, stream)
+		let vessels = aisTargets(in: frames)
+
+		// One under helm to port, one to starboard, so the chart has both
+		// predictor colours to draw; the rest of the fleet holds its course.
+		let toPort = try #require(vessels.first { $0.shipName == "SAN ROCCO" })
+		let toStarboard = try #require(vessels.first { $0.shipName == "BONIFACIO" })
+		#expect(toPort.rateOfTurn == -9)
+		#expect(toStarboard.rateOfTurn == 6)
+		#expect(vessels.first { $0.shipName == "ALERIA" }?.rateOfTurn == nil)
+	}
+
+	@Test("A turning vessel's course follows the helm she reports")
+	func turningVesselSwingsHerCourse() async throws {
+		let stream = NMEASimulator.frameStream(
+			route: .monacoToMaddalena, speedKnots: 6, loop: false
+		)
+		let frames = try await framesUntil(ticks: 6, stream)
+		let reports = aisTargets(in: frames).filter { $0.shipName == "BONIFACIO" }
+		let courses = reports.compactMap(\.courseOverGround)
+
+		// She starts on 300 and comes right, so the course only ever increases
+		// — a predictor drawn along it would otherwise disagree with her track.
+		try #require(courses.count >= 2)
+		#expect(courses.first! >= 300)
+		#expect(courses.last! > courses.first!)
+	}
+
 	@Test("Non-vessel AIS messages trickle in (base station, AtoN, safety, SART)")
 	func emitsAISEventVariety() async throws {
 		let stream = NMEASimulator.frameStream(

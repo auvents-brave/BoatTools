@@ -982,6 +982,9 @@ public enum NMEASimulator {
 		var destination: String?
 		var eta: AISTarget.ETA?
 		var draught: Double?
+		/// Rate of turn in °/min, positive to starboard. `nil` for a vessel
+		/// holding its course, which is most of the fleet.
+		var rotDegPerMin: Double?
 	}
 
 	/// A spread of traffic along the Gibraltar→Genoa corridor and around Corsica.
@@ -1028,12 +1031,16 @@ public enum NMEASimulator {
 		AISShip(
 			mmsi: 247_990_091, name: "ALERIA", type: .cargo, classB: false,
 			start: GeoPoint(latitude: 42.10, longitude: 9.65), course: 350, speed: 11.0),
+		// Working her gear round in a circle, so she reads as turning to port.
 		AISShip(
 			mmsi: 247_990_101, name: "SAN ROCCO", type: .fishing, classB: true,
-			start: GeoPoint(latitude: 41.60, longitude: 9.30), course: 120, speed: 6.5),
+			start: GeoPoint(latitude: 41.60, longitude: 9.30), course: 120, speed: 6.5,
+			rotDegPerMin: -9),
+		// A long sweeping alteration to starboard off the strait.
 		AISShip(
 			mmsi: 228_990_111, name: "BONIFACIO", type: .highSpeedCraft, classB: false,
-			start: GeoPoint(latitude: 41.38, longitude: 9.16), course: 300, speed: 28.0),
+			start: GeoPoint(latitude: 41.38, longitude: 9.16), course: 300, speed: 28.0,
+			rotDegPerMin: 6),
 		AISShip(
 			mmsi: 247_990_121, name: "MAGDALENA", type: .sailing, classB: true,
 			start: GeoPoint(latitude: 41.30, longitude: 9.45), course: 280, speed: 5.5),
@@ -1073,10 +1080,7 @@ public enum NMEASimulator {
 		into continuation: AsyncThrowingStream<NMEAFrame, any Error>.Continuation
 	) {
 		for ship in aisFleet {
-			let pos = destination(
-				from: ship.start,
-				distanceMetres: ship.speed * knotsToMetresPerSecond * passageSeconds,
-				bearingDegrees: ship.course)
+			let (pos, course) = position(of: ship, after: passageSeconds)
 			continuation.yield(
 				.aisTarget(
 					AISTarget(
@@ -1084,8 +1088,9 @@ public enum NMEASimulator {
 						messageType: ship.classB ? .standardClassBReport : .positionReportClassA,
 						channel: ship.classB ? "B" : "A",
 						latitude: pos.latitude, longitude: pos.longitude,
-						speedOverGround: ship.speed, courseOverGround: ship.course,
-						trueHeading: Int(ship.course.rounded()),
+						speedOverGround: ship.speed, courseOverGround: course,
+						trueHeading: Int(course.rounded()),
+						rateOfTurn: ship.rotDegPerMin.map { Int($0.rounded()) },
 						navigationStatus: ship.classB ? nil : .underWayUsingEngine,
 						shipName: ship.name, callsign: ship.callsign, shipType: ship.type,
 						destination: ship.destination, draught: ship.draught,
@@ -1217,6 +1222,31 @@ public enum NMEASimulator {
 
 	/// Point reached by travelling `distanceMetres` from `origin` on a true
 	/// `bearingDegrees` great-circle course.
+	/// Where a ship of the fleet has got to after `seconds`, and the course she is
+	/// on there: a straight run, or an arc for one under helm, stepped so the
+	/// track she leaves matches the rate of turn she broadcasts.
+	private static func position(of ship: AISShip, after seconds: Double) -> (GeoPoint, Double) {
+		let metresPerSecond = ship.speed * knotsToMetresPerSecond
+		guard let rot = ship.rotDegPerMin, rot != 0 else {
+			let straight = destination(
+				from: ship.start, distanceMetres: metresPerSecond * seconds,
+				bearingDegrees: ship.course)
+			return (straight, ship.course)
+		}
+		var here = ship.start
+		var course = ship.course
+		var elapsed = 0.0
+		while elapsed < seconds {
+			let dt = min(30, seconds - elapsed)
+			course += rot / 60 * dt
+			here = destination(
+				from: here, distanceMetres: metresPerSecond * dt, bearingDegrees: course)
+			elapsed += dt
+		}
+		return (here, (course.truncatingRemainder(dividingBy: 360) + 360)
+			.truncatingRemainder(dividingBy: 360))
+	}
+
 	private static func destination(
 		from origin: GeoPoint, distanceMetres: Double, bearingDegrees: Double
 	) -> GeoPoint {
