@@ -253,6 +253,103 @@ struct NMEASimulatorTests {
 		#expect(vessels.contains { $0.shipName == "CORSICA VICTORIA" })
 	}
 
+	@Test("Class A vessels report a rate of turn, Class B cannot")
+	func reportsRateOfTurnOnClassAOnly() async throws {
+		let stream = NMEASimulator.frameStream(
+			route: .monacoToMaddalena, speedKnots: 6, loop: false
+		)
+		let frames = try await framesUntil(ticks: 2, stream)
+		let vessels = aisTargets(in: frames)
+
+		// Class A carries the field, so it says 0 while standing on; a Class B
+		// position report has no rate-of-turn field at all.
+		let classA = try #require(vessels.first { $0.shipName == "BONIFACIO" })
+		let classB = try #require(vessels.first { $0.shipName == "SAN ROCCO" })
+		#expect(classA.rateOfTurn != nil)
+		#expect(classB.rateOfTurn == nil)
+	}
+
+	@Test("A vessel comes under helm now and then, not for ever")
+	func vesselsTurnIntermittently() async throws {
+		// A whole round, sampled: she runs her leg, alters course, runs the next,
+		// and so on — so the chart sees a target that is sometimes swinging and
+		// most of the time standing on.
+		let stream = NMEASimulator.frameStream(
+			route: .monacoToMaddalena, speedKnots: 6, timeMultiplier: 6000,
+			updateInterval: .milliseconds(20), loop: false
+		)
+		let frames = try await framesUntil(ticks: 40, stream)
+		let rates = aisTargets(in: frames)
+			.filter { $0.shipName == "CABO FINISTERRE" }
+			.compactMap(\.rateOfTurn)
+
+		try #require(rates.count >= 20)
+		#expect(rates.contains { $0 != 0 })  // she does turn
+		#expect(rates.contains { $0 == 0 })  // and she does not only turn
+		// A vessel works her round one way, so her turns never change sign.
+		let turns = Set(rates.filter { $0 != 0 }.map { $0 < 0 })
+		#expect(turns.count == 1)
+	}
+
+	@Test("The fleet does not all turn the same way")
+	func fleetTurnsBothWays() async throws {
+		// Every vessel turning to starboard left the chart showing nothing but
+		// green predictors; half the fleet works her round the other way.
+		let stream = NMEASimulator.frameStream(
+			route: .monacoToMaddalena, speedKnots: 6, timeMultiplier: 6000,
+			updateInterval: .milliseconds(20), loop: false
+		)
+		let frames = try await framesUntil(ticks: 60, stream)
+		let turning = aisTargets(in: frames).compactMap(\.rateOfTurn).filter { $0 != 0 }
+
+		try #require(!turning.isEmpty)
+		#expect(turning.contains { $0 < 0 })  // some to port
+		#expect(turning.contains { $0 > 0 })  // some to starboard
+	}
+
+	@Test("Her alterations of course are modest, not hand-brake turns")
+	func alterationsAreModest() async throws {
+		// A vessel hauling through 180° is a thing no navigator sees. Each
+		// alteration is a twentieth of a circle or so, and the rate she swings
+		// at stays within what a ship can actually do.
+		let stream = NMEASimulator.frameStream(
+			route: .monacoToMaddalena, speedKnots: 6, timeMultiplier: 6000,
+			updateInterval: .milliseconds(20), loop: false
+		)
+		let frames = try await framesUntil(ticks: 60, stream)
+		let rates = aisTargets(in: frames).compactMap(\.rateOfTurn).filter { $0 != 0 }
+
+		try #require(!rates.isEmpty)
+		#expect(rates.allSatisfy { abs($0) <= 30 })
+	}
+
+	@Test("A vessel keeps to her own water instead of steaming ashore")
+	func vesselsStayOnTheirCircuit() async throws {
+		let stream = NMEASimulator.frameStream(
+			route: .monacoToMaddalena, speedKnots: 6, timeMultiplier: 20000,
+			updateInterval: .milliseconds(20), loop: false
+		)
+		let frames = try await framesUntil(ticks: 40, stream)
+		let seen = aisTargets(in: frames)
+			.filter { $0.shipName == "ALERIA" }
+			.compactMap { fix -> (Double, Double)? in
+				guard let lat = fix.latitude, let lon = fix.longitude else { return nil }
+				return (lat, lon)
+			}
+
+		try #require(seen.count >= 20)
+		// Her round is closed, so she never wanders far from where she began
+		// however long the simulation runs — a straight course would have put
+		// her over Corsica inside four hours.
+		let first = seen[0]
+		let drift = seen.map { fix in
+			let dLat = (fix.0 - first.0) * 60
+			let dLon = (fix.1 - first.1) * 60 * 0.74
+			return (dLat * dLat + dLon * dLon).squareRoot()
+		}
+		#expect(drift.max()! < 60)
+	}
+
 	@Test("Non-vessel AIS messages trickle in (base station, AtoN, safety, SART)")
 	func emitsAISEventVariety() async throws {
 		let stream = NMEASimulator.frameStream(

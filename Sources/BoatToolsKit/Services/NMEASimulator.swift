@@ -977,6 +977,16 @@ public enum NMEASimulator {
 		let start: GeoPoint
 		let course: Double
 		let speed: Double
+		/// How far she runs between one alteration of course and the next.
+		let legNM: Double
+		/// How many legs make up her round, and so how sharp each alteration is:
+		/// an eighteen-sided round is eighteen turns of 20°.
+		let sides: Int
+		/// How briskly she comes round, °/min.
+		let turnRate: Double
+		/// Which way she works her round. Half the fleet goes each way, so the
+		/// chart is not all turning one side.
+		let turnsToPort: Bool
 		/// Type-5 voyage data — class A commercial traffic broadcasts it.
 		var callsign: String?
 		var destination: String?
@@ -987,83 +997,103 @@ public enum NMEASimulator {
 	/// A spread of traffic along the Gibraltar→Genoa corridor and around Corsica.
 	/// MMSIs are fictitious — a real maritime ID (MID) flag prefix padded with 9s
 	/// — so they never collide with a real vessel.
+	///
+	/// Every round here was solved against the Natural Earth coastline the app
+	/// itself ships and then checked over a simulated day, so no vessel starts
+	/// ashore or works her way there. Roughly half go round to port and half to
+	/// starboard, and each is under helm about a tenth of the time.
 	private static let aisFleet: [AISShip] = [
 		// Western corridor (Gibraltar → Ligurian Sea).
 		AISShip(
 			mmsi: 224_990_011, name: "CABO FINISTERRE", type: .cargo, classB: false,
-			start: GeoPoint(latitude: 36.10, longitude: -5.20), course: 62, speed: 14.5,
+			start: GeoPoint(latitude: 36.1, longitude: -5.2), course: 42, speed: 14.5,
+			legNM: 8.34, sides: 18, turnRate: 8, turnsToPort: false,
 			callsign: "EA9901", destination: "GENOVA",
 			eta: AISTarget.ETA(month: 7, day: 9, hour: 6, minute: 0), draught: 9.8),
 		AISShip(
 			mmsi: 256_990_021, name: "MELITA STAR", type: .cargo, classB: false,
-			start: GeoPoint(latitude: 37.40, longitude: -1.80), course: 58, speed: 13.0,
+			start: GeoPoint(latitude: 37.339, longitude: -1.614), course: 258, speed: 13,
+			legNM: 1.74, sides: 18, turnRate: 20, turnsToPort: true,
 			callsign: "9H9901", destination: "MARSEILLE", draught: 8.4),
 		AISShip(
 			mmsi: 247_990_031, name: "GOLFO DI NAPOLI", type: .passenger, classB: false,
-			start: GeoPoint(latitude: 38.90, longitude: 2.40), course: 55, speed: 18.0,
+			start: GeoPoint(latitude: 38.9, longitude: 2.4), course: 245, speed: 18,
+			legNM: 8.34, sides: 18, turnRate: 8, turnsToPort: true,
 			callsign: "IB9901", destination: "NAPOLI", draught: 6.8),
 		AISShip(
 			mmsi: 228_990_041, name: "MARSEILLE EXPRESS", type: .cargo, classB: false,
-			start: GeoPoint(latitude: 41.20, longitude: 5.10), course: 70, speed: 16.0,
+			start: GeoPoint(latitude: 41.2, longitude: 5.1), course: 70, speed: 16,
+			legNM: 8.34, sides: 18, turnRate: 8, turnsToPort: false,
 			callsign: "FN9901", destination: "GENOVA",
 			eta: AISTarget.ETA(month: 7, day: 7, hour: 14, minute: 30), draught: 10.2),
 		AISShip(
 			mmsi: 636_990_051, name: "ATLANTIC PIONEER", type: .cargo, classB: false,
-			start: GeoPoint(latitude: 42.60, longitude: 7.20), course: 75, speed: 15.5,
+			start: GeoPoint(latitude: 42.6, longitude: 7.2), course: 95, speed: 15.5,
+			legNM: 8.34, sides: 18, turnRate: 8, turnsToPort: true,
 			callsign: "A89901", destination: "LIVORNO", draught: 11.6),
 		AISShip(
 			mmsi: 538_990_061, name: "PACIFIC ENVOY", type: .cargo, classB: false,
-			start: GeoPoint(latitude: 43.50, longitude: 8.40), course: 248, speed: 14.0,
+			start: GeoPoint(latitude: 43.5, longitude: 8.4), course: 338, speed: 14,
+			legNM: 8.34, sides: 18, turnRate: 8, turnsToPort: false,
 			callsign: "V79901", destination: "VALENCIA", draught: 9.1),
 		// Around Corsica and the Ligurian / Tyrrhenian, near the passage.
 		AISShip(
 			mmsi: 247_990_071, name: "CORSICA VICTORIA", type: .passenger, classB: false,
-			start: GeoPoint(latitude: 42.70, longitude: 9.45), course: 200, speed: 21.0,
+			start: GeoPoint(latitude: 42.73, longitude: 9.501), course: 200, speed: 21,
+			legNM: 2.08, sides: 18, turnRate: 25, turnsToPort: true,
 			callsign: "IB9902", destination: "BASTIA",
 			eta: AISTarget.ETA(month: 7, day: 6, hour: 11, minute: 45), draught: 6.4),
 		AISShip(
 			mmsi: 228_990_081, name: "MEDITERRANEE", type: .passenger, classB: false,
-			start: GeoPoint(latitude: 41.90, longitude: 8.74), course: 20, speed: 19.0,
+			start: GeoPoint(latitude: 41.818, longitude: 8.636), course: 185, speed: 19,
+			legNM: 3.47, sides: 18, turnRate: 15, turnsToPort: false,
 			callsign: "FN9902", destination: "AJACCIO", draught: 6.9),
 		AISShip(
 			mmsi: 247_990_091, name: "ALERIA", type: .cargo, classB: false,
-			start: GeoPoint(latitude: 42.10, longitude: 9.65), course: 350, speed: 11.0),
+			start: GeoPoint(latitude: 42.1, longitude: 9.65), course: 170, speed: 11,
+			legNM: 8.34, sides: 18, turnRate: 8, turnsToPort: true),
 		AISShip(
 			mmsi: 247_990_101, name: "SAN ROCCO", type: .fishing, classB: true,
-			start: GeoPoint(latitude: 41.60, longitude: 9.30), course: 120, speed: 6.5),
+			start: GeoPoint(latitude: 41.617, longitude: 9.386), course: 30, speed: 6.5,
+			legNM: 0.87, sides: 18, turnRate: 20, turnsToPort: false),
 		AISShip(
 			mmsi: 228_990_111, name: "BONIFACIO", type: .highSpeedCraft, classB: false,
-			start: GeoPoint(latitude: 41.38, longitude: 9.16), course: 300, speed: 28.0),
+			start: GeoPoint(latitude: 41.398, longitude: 9.034), course: 300, speed: 28,
+			legNM: 2.78, sides: 18, turnRate: 25, turnsToPort: true),
 		AISShip(
 			mmsi: 247_990_121, name: "MAGDALENA", type: .sailing, classB: true,
-			start: GeoPoint(latitude: 41.30, longitude: 9.45), course: 280, speed: 5.5),
+			start: GeoPoint(latitude: 41.3, longitude: 9.45), course: 345, speed: 5.5,
+			legNM: 8.34, sides: 18, turnRate: 8, turnsToPort: false),
 		AISShip(
 			mmsi: 228_990_131, name: "VENT D'EST", type: .sailing, classB: true,
-			start: GeoPoint(latitude: 42.30, longitude: 8.10), course: 160, speed: 6.0),
+			start: GeoPoint(latitude: 42.3, longitude: 8.1), course: 70, speed: 6,
+			legNM: 8.34, sides: 18, turnRate: 8, turnsToPort: true),
 		AISShip(
 			mmsi: 247_990_141, name: "TIRRENO", type: .cargo, classB: false,
-			start: GeoPoint(latitude: 41.00, longitude: 9.80), course: 15, speed: 13.5),
+			start: GeoPoint(latitude: 41.0, longitude: 9.8), course: 15, speed: 13.5,
+			legNM: 8.34, sides: 18, turnRate: 8, turnsToPort: false),
 		AISShip(
 			mmsi: 256_990_151, name: "VALLETTA PRIDE", type: .cargo, classB: false,
-			start: GeoPoint(latitude: 40.50, longitude: 9.20), course: 5, speed: 14.0),
+			start: GeoPoint(latitude: 40.748, longitude: 9.771), course: 185, speed: 14,
+			legNM: 3.47, sides: 18, turnRate: 10, turnsToPort: true),
 		AISShip(
 			mmsi: 227_990_161, name: "NICE LA BELLE", type: .passenger, classB: false,
-			start: GeoPoint(latitude: 43.50, longitude: 7.40), course: 130, speed: 17.5,
-			callsign: "FN9903", destination: "CALVI",
-			eta: AISTarget.ETA(month: 7, day: 6, hour: 18, minute: 15), draught: 5.8),
-		// Coastal ferry leaving Monaco as the passage starts — close AIS traffic
-		// right at the departure, so a target is on-screen from the first minute.
+			start: GeoPoint(latitude: 43.5, longitude: 7.4), course: 110, speed: 17.5,
+			legNM: 8.34, sides: 18, turnRate: 8, turnsToPort: false,
+			callsign: "FN9903", destination: "CALVI", draught: 5.2),
 		AISShip(
 			mmsi: 227_990_191, name: "AZUR EXPRESS", type: .passenger, classB: false,
-			start: GeoPoint(latitude: 43.72, longitude: 7.44), course: 245, speed: 15.0,
-			callsign: "FN9904", destination: "NICE",
-			eta: AISTarget.ETA(month: 7, day: 6, hour: 9, minute: 30), draught: 4.6),
+			start: GeoPoint(latitude: 43.703, longitude: 7.48), course: 275, speed: 15,
+			legNM: 2.08, sides: 18, turnRate: 20, turnsToPort: true,
+			callsign: "FN9904", destination: "NICE", draught: 4.8),
 		AISShip(
 			mmsi: 247_990_171, name: "LIBECCIO", type: .tug, classB: true,
-			start: GeoPoint(latitude: 43.00, longitude: 9.50), course: 210, speed: 8.0),
+			start: GeoPoint(latitude: 43.0, longitude: 9.5), course: 345, speed: 8,
+			legNM: 4.86, sides: 18, turnRate: 8, turnsToPort: false),
 		AISShip(
 			mmsi: 228_990_181, name: "PILOTE CORSE", type: .pilotVessel, classB: true,
-			start: GeoPoint(latitude: 41.92, longitude: 8.72), course: 250, speed: 9.0),
+			start: GeoPoint(latitude: 41.826, longitude: 8.673), course: 330, speed: 9,
+			legNM: 1.04, sides: 18, turnRate: 25, turnsToPort: true),
 	]
 
 	/// Emits the moving AIS fleet plus the occasional non-vessel message (base
@@ -1073,10 +1103,7 @@ public enum NMEASimulator {
 		into continuation: AsyncThrowingStream<NMEAFrame, any Error>.Continuation
 	) {
 		for ship in aisFleet {
-			let pos = destination(
-				from: ship.start,
-				distanceMetres: ship.speed * knotsToMetresPerSecond * passageSeconds,
-				bearingDegrees: ship.course)
+			let (pos, course, rot) = position(of: ship, after: passageSeconds)
 			continuation.yield(
 				.aisTarget(
 					AISTarget(
@@ -1084,8 +1111,11 @@ public enum NMEASimulator {
 						messageType: ship.classB ? .standardClassBReport : .positionReportClassA,
 						channel: ship.classB ? "B" : "A",
 						latitude: pos.latitude, longitude: pos.longitude,
-						speedOverGround: ship.speed, courseOverGround: ship.course,
-						trueHeading: Int(ship.course.rounded()),
+						speedOverGround: ship.speed, courseOverGround: course,
+						trueHeading: Int(course.rounded()),
+						// A Class B position report has no rate-of-turn field at all,
+						// so only the class A traffic can say which way it is swinging.
+						rateOfTurn: ship.classB ? nil : Int(rot.rounded()),
 						navigationStatus: ship.classB ? nil : .underWayUsingEngine,
 						shipName: ship.name, callsign: ship.callsign, shipType: ship.type,
 						destination: ship.destination, draught: ship.draught,
@@ -1217,6 +1247,65 @@ public enum NMEASimulator {
 
 	/// Point reached by travelling `distanceMetres` from `origin` on a true
 	/// `bearingDegrees` great-circle course.
+	/// Where a ship of the fleet is after `seconds`, the course she is on there,
+	/// and the rate of turn she is making.
+	///
+	/// Every vessel works a closed round: a leg, a modest alteration of course,
+	/// another leg, and so on until the turns have added up to a full circle and
+	/// she is back where she began. Two things follow. She keeps to her own
+	/// patch of water however long the simulation runs, instead of steaming off
+	/// across Corsica; and the chart gets what a fleet of constant-course
+	/// vessels could never show it — a target under helm now and then.
+	///
+	/// The alterations are deliberately small, a twentieth of a circle: a ship
+	/// hauling through 180° is a thing no navigator ever sees, and with the
+	/// whole fleet doing it there was always one wheeling about somewhere.
+	/// Half the fleet works her round to port and half to starboard.
+	///
+	/// Each leg is one projection and only the turns are stepped, so the work
+	/// per vessel does not grow with the length of the passage.
+	private static func position(of ship: AISShip, after seconds: Double)
+		-> (point: GeoPoint, course: Double, rateOfTurn: Double)
+	{
+		let metresPerSecond = ship.speed * knotsToMetresPerSecond
+		let legSeconds = ship.legNM / ship.speed * 3600
+		let turnSeconds = (360 / Double(ship.sides)) / ship.turnRate * 60
+		let rate = ship.turnsToPort ? -ship.turnRate : ship.turnRate
+		var remaining = seconds.truncatingRemainder(
+			dividingBy: Double(ship.sides) * (legSeconds + turnSeconds))
+
+		var here = ship.start
+		var course = ship.course
+		var turningNow = false
+
+		for _ in 0..<ship.sides {
+			let onLeg = min(remaining, legSeconds)
+			here = destination(
+				from: here, distanceMetres: metresPerSecond * onLeg, bearingDegrees: course)
+			remaining -= onLeg
+			if remaining <= 0 { break }
+
+			let inTurn = min(remaining, turnSeconds)
+			// A fixed handful of steps, so her track follows the arc rather than
+			// cutting it, without the cost growing with the turn.
+			let step = inTurn / 8
+			for _ in 0..<8 {
+				course += rate / 60 * step
+				here = destination(
+					from: here, distanceMetres: metresPerSecond * step, bearingDegrees: course)
+			}
+			remaining -= inTurn
+			if remaining <= 0 {
+				turningNow = true
+				break
+			}
+		}
+
+		let heading = (course.truncatingRemainder(dividingBy: 360) + 360)
+			.truncatingRemainder(dividingBy: 360)
+		return (here, heading, turningNow ? rate : 0)
+	}
+
 	private static func destination(
 		from origin: GeoPoint, distanceMetres: Double, bearingDegrees: Double
 	) -> GeoPoint {
