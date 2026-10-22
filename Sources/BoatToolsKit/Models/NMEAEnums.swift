@@ -349,22 +349,22 @@ public enum NavigationStatus: Int, Sendable, Equatable {
 	/// A human-readable label suitable for display.
 	public var label: String {
 		switch self {
-		case .underWayUsingEngine: return "Under Way Using Engine"
-		case .atAnchor: return "At Anchor"
-		case .notUnderCommand: return "Not Under Command"
-		case .restrictedManoeuvrability: return "Restricted Manoeuvrability"
-		case .constrainedByDraught: return "Constrained By Draught"
-		case .moored: return "Moored"
-		case .aground: return "Aground"
-		case .engagedInFishing: return "Engaged in Fishing"
-		case .underWaySailing: return "Under Way Sailing"
-		case .reservedHSC: return "Reserved — HSC"
-		case .reservedWIG: return "Reserved — WIG"
-		case .powerDrivenVesselTowing: return "Power-Driven Vessel Towing Astern"
-		case .powerDrivenVesselPushing: return "Power-Driven Vessel Pushing Ahead"
-		case .reserved13: return "Reserved"
-		case .aisSearchAndRescue: return "AIS-SART / MOB / EPIRB"
-		case .undefined: return "Undefined"
+		case .underWayUsingEngine: return String(localized: "Under Way Using Engine", bundle: .module)
+		case .atAnchor: return String(localized: "At Anchor", bundle: .module)
+		case .notUnderCommand: return String(localized: "Not Under Command", bundle: .module)
+		case .restrictedManoeuvrability: return String(localized: "Restricted Manoeuvrability", bundle: .module)
+		case .constrainedByDraught: return String(localized: "Constrained By Draught", bundle: .module)
+		case .moored: return String(localized: "Moored", bundle: .module)
+		case .aground: return String(localized: "Aground", bundle: .module)
+		case .engagedInFishing: return String(localized: "Engaged in Fishing", bundle: .module)
+		case .underWaySailing: return String(localized: "Under Way Sailing", bundle: .module)
+		case .reservedHSC: return String(localized: "Reserved — HSC", bundle: .module)
+		case .reservedWIG: return String(localized: "Reserved — WIG", bundle: .module)
+		case .powerDrivenVesselTowing: return String(localized: "Power-Driven Vessel Towing Astern", bundle: .module)
+		case .powerDrivenVesselPushing: return String(localized: "Power-Driven Vessel Pushing Ahead", bundle: .module)
+		case .reserved13: return String(localized: "Reserved", bundle: .module)
+		case .aisSearchAndRescue: return String(localized: "AIS-SART / MOB / EPIRB", bundle: .module)
+		case .undefined: return String(localized: "Undefined", bundle: .module)
 		}
 	}
 }
@@ -444,79 +444,79 @@ public enum ShipType: Int, Sendable, Equatable {
 	/// A human-readable label suitable for display.
 	public var label: String {
 		switch self {
-		case .notAvailable: return "Not Available"
-		case .wingInGround: return "Wing In Ground"
-		case .wingInGroundHazardousA: return "WIG — Hazardous Cat A"
-		case .wingInGroundHazardousB: return "WIG — Hazardous Cat B"
-		case .wingInGroundHazardousC: return "WIG — Hazardous Cat C"
-		case .wingInGroundHazardousD: return "WIG — Hazardous Cat D"
-		case .fishing: return "Fishing"
-		case .towing: return "Towing"
-		case .towingLarge: return "Towing — Large"
-		case .dredgingOrUnderwaterOps: return "Dredging / Underwater Ops"
-		case .divingOps: return "Diving Operations"
-		case .militaryOps: return "Military Operations"
-		case .sailing: return "Sailing"
-		case .pleasureCraft: return "Pleasure Craft"
-		case .highSpeedCraft: return "High Speed Craft"
-		case .highSpeedCraftHazardousA: return "HSC — Hazardous Cat A"
-		case .highSpeedCraftHazardousB: return "HSC — Hazardous Cat B"
-		case .highSpeedCraftHazardousC: return "HSC — Hazardous Cat C"
-		case .highSpeedCraftHazardousD: return "HSC — Hazardous Cat D"
-		case .pilotVessel: return "Pilot Vessel"
-		case .searchAndRescue: return "Search and Rescue"
-		case .tug: return "Tug"
-		case .portTender: return "Port Tender"
-		case .antiPollution: return "Anti-Pollution Equipment"
-		case .lawEnforcement: return "Law Enforcement"
-		case .localVessel56: return "Local Vessel"
-		case .localVessel57: return "Local Vessel"
-		case .medicalTransport: return "Medical Transport"
-		case .noncombatantShip: return "Noncombatant Ship"
-		case .passenger: return "Passenger"
-		case .passengerHazardousA: return "Passenger — Hazardous Cat A"
-		case .passengerHazardousB: return "Passenger — Hazardous Cat B"
-		case .passengerHazardousC: return "Passenger — Hazardous Cat C"
-		case .passengerHazardousD: return "Passenger — Hazardous Cat D"
+		case .notAvailable: return String(localized: "Not Available", bundle: .module)
+		case .wingInGround: return String(localized: "Wing In Ground", bundle: .module)
+		case .wingInGroundHazardousA: return String(localized: "WIG — Hazardous Cat A", bundle: .module)
+		case .wingInGroundHazardousB: return String(localized: "WIG — Hazardous Cat B", bundle: .module)
+		case .wingInGroundHazardousC: return String(localized: "WIG — Hazardous Cat C", bundle: .module)
+		case .wingInGroundHazardousD: return String(localized: "WIG — Hazardous Cat D", bundle: .module)
+		case .fishing: return String(localized: "Fishing", bundle: .module)
+		case .towing: return String(localized: "Towing", bundle: .module)
+		case .towingLarge: return String(localized: "Towing — Large", bundle: .module)
+		case .dredgingOrUnderwaterOps: return String(localized: "Dredging / Underwater Ops", bundle: .module)
+		case .divingOps: return String(localized: "Diving Operations", bundle: .module)
+		case .militaryOps: return String(localized: "Military Operations", bundle: .module)
+		case .sailing: return String(localized: "Sailing", bundle: .module)
+		case .pleasureCraft: return String(localized: "Pleasure Craft", bundle: .module)
+		case .highSpeedCraft: return String(localized: "High Speed Craft", bundle: .module)
+		case .highSpeedCraftHazardousA: return String(localized: "HSC — Hazardous Cat A", bundle: .module)
+		case .highSpeedCraftHazardousB: return String(localized: "HSC — Hazardous Cat B", bundle: .module)
+		case .highSpeedCraftHazardousC: return String(localized: "HSC — Hazardous Cat C", bundle: .module)
+		case .highSpeedCraftHazardousD: return String(localized: "HSC — Hazardous Cat D", bundle: .module)
+		case .pilotVessel: return String(localized: "Pilot Vessel", bundle: .module)
+		case .searchAndRescue: return String(localized: "Search and Rescue", bundle: .module)
+		case .tug: return String(localized: "Tug", bundle: .module)
+		case .portTender: return String(localized: "Port Tender", bundle: .module)
+		case .antiPollution: return String(localized: "Anti-Pollution Equipment", bundle: .module)
+		case .lawEnforcement: return String(localized: "Law Enforcement", bundle: .module)
+		case .localVessel56: return String(localized: "Local Vessel", bundle: .module)
+		case .localVessel57: return String(localized: "Local Vessel", bundle: .module)
+		case .medicalTransport: return String(localized: "Medical Transport", bundle: .module)
+		case .noncombatantShip: return String(localized: "Noncombatant Ship", bundle: .module)
+		case .passenger: return String(localized: "Passenger", bundle: .module)
+		case .passengerHazardousA: return String(localized: "Passenger — Hazardous Cat A", bundle: .module)
+		case .passengerHazardousB: return String(localized: "Passenger — Hazardous Cat B", bundle: .module)
+		case .passengerHazardousC: return String(localized: "Passenger — Hazardous Cat C", bundle: .module)
+		case .passengerHazardousD: return String(localized: "Passenger — Hazardous Cat D", bundle: .module)
 		case .passengerReserved65,
 			.passengerReserved66,
 			.passengerReserved67,
 			.passengerReserved68:
-			return "Passenger — Reserved"
-		case .passengerNoAdditional: return "Passenger"
-		case .cargo: return "Cargo"
-		case .cargoHazardousA: return "Cargo — Hazardous Cat A"
-		case .cargoHazardousB: return "Cargo — Hazardous Cat B"
-		case .cargoHazardousC: return "Cargo — Hazardous Cat C"
-		case .cargoHazardousD: return "Cargo — Hazardous Cat D"
+			return String(localized: "Passenger — Reserved", bundle: .module)
+		case .passengerNoAdditional: return String(localized: "Passenger", bundle: .module)
+		case .cargo: return String(localized: "Cargo", bundle: .module)
+		case .cargoHazardousA: return String(localized: "Cargo — Hazardous Cat A", bundle: .module)
+		case .cargoHazardousB: return String(localized: "Cargo — Hazardous Cat B", bundle: .module)
+		case .cargoHazardousC: return String(localized: "Cargo — Hazardous Cat C", bundle: .module)
+		case .cargoHazardousD: return String(localized: "Cargo — Hazardous Cat D", bundle: .module)
 		case .cargoReserved75,
 			.cargoReserved76,
 			.cargoReserved77,
 			.cargoReserved78:
-			return "Cargo — Reserved"
-		case .cargoNoAdditional: return "Cargo"
-		case .tanker: return "Tanker"
-		case .tankerHazardousA: return "Tanker — Hazardous Cat A"
-		case .tankerHazardousB: return "Tanker — Hazardous Cat B"
-		case .tankerHazardousC: return "Tanker — Hazardous Cat C"
-		case .tankerHazardousD: return "Tanker — Hazardous Cat D"
+			return String(localized: "Cargo — Reserved", bundle: .module)
+		case .cargoNoAdditional: return String(localized: "Cargo", bundle: .module)
+		case .tanker: return String(localized: "Tanker", bundle: .module)
+		case .tankerHazardousA: return String(localized: "Tanker — Hazardous Cat A", bundle: .module)
+		case .tankerHazardousB: return String(localized: "Tanker — Hazardous Cat B", bundle: .module)
+		case .tankerHazardousC: return String(localized: "Tanker — Hazardous Cat C", bundle: .module)
+		case .tankerHazardousD: return String(localized: "Tanker — Hazardous Cat D", bundle: .module)
 		case .tankerReserved85,
 			.tankerReserved86,
 			.tankerReserved87,
 			.tankerReserved88:
-			return "Tanker — Reserved"
-		case .tankerNoAdditional: return "Tanker"
-		case .otherType: return "Other"
-		case .otherHazardousA: return "Other — Hazardous Cat A"
-		case .otherHazardousB: return "Other — Hazardous Cat B"
-		case .otherHazardousC: return "Other — Hazardous Cat C"
-		case .otherHazardousD: return "Other — Hazardous Cat D"
+			return String(localized: "Tanker — Reserved", bundle: .module)
+		case .tankerNoAdditional: return String(localized: "Tanker", bundle: .module)
+		case .otherType: return String(localized: "Other", bundle: .module)
+		case .otherHazardousA: return String(localized: "Other — Hazardous Cat A", bundle: .module)
+		case .otherHazardousB: return String(localized: "Other — Hazardous Cat B", bundle: .module)
+		case .otherHazardousC: return String(localized: "Other — Hazardous Cat C", bundle: .module)
+		case .otherHazardousD: return String(localized: "Other — Hazardous Cat D", bundle: .module)
 		case .otherReserved95,
 			.otherReserved96,
 			.otherReserved97,
 			.otherReserved98:
-			return "Other — Reserved"
-		case .otherNoAdditional: return "Other"
+			return String(localized: "Other — Reserved", bundle: .module)
+		case .otherNoAdditional: return String(localized: "Other", bundle: .module)
 		}
 	}
 }
@@ -623,38 +623,38 @@ public enum NavigationalAidType: Int, Sendable, Equatable {
 	/// A human-readable label suitable for display.
 	public var label: String {
 		switch self {
-		case .defaultUnspecified: return "Unspecified"
-		case .referencePoint: return "Reference Point"
-		case .racon: return "RACON"
-		case .fixedStructure: return "Fixed Structure"
-		case .spare4: return "Spare"
-		case .lightNoSectors: return "Light (no sectors)"
-		case .lightWithSectors: return "Light (with sectors)"
-		case .leadingLightFront: return "Leading Light — Front"
-		case .leadingLightRear: return "Leading Light — Rear"
-		case .beaconCardinalN: return "Beacon — Cardinal N"
-		case .beaconCardinalE: return "Beacon — Cardinal E"
-		case .beaconCardinalS: return "Beacon — Cardinal S"
-		case .beaconCardinalW: return "Beacon — Cardinal W"
-		case .beaconPortHand: return "Beacon — Port Hand"
-		case .beaconStarboardHand: return "Beacon — Starboard Hand"
-		case .beaconPreferredChannelPortHand: return "Beacon — Preferred Channel Port Hand"
-		case .beaconPreferredChannelStarboardHand: return "Beacon — Preferred Channel Starboard Hand"
-		case .beaconIsolatedDanger: return "Beacon — Isolated Danger"
-		case .beaconSafeWater: return "Beacon — Safe Water"
-		case .beaconSpecialMark: return "Beacon — Special Mark"
-		case .beaconLightVessel: return "Beacon — Light Vessel / LANBY"
-		case .lanby: return "LANBY"
-		case .buoyCardinalN: return "Buoy — Cardinal N"
-		case .buoyCardinalE: return "Buoy — Cardinal E"
-		case .buoyCardinalS: return "Buoy — Cardinal S"
-		case .buoyCardinalW: return "Buoy — Cardinal W"
-		case .buoyPortHand: return "Buoy — Port Hand"
-		case .buoyStarboardHand: return "Buoy — Starboard Hand"
-		case .buoyPreferredChannelPortHand: return "Buoy — Preferred Channel Port Hand"
-		case .buoyPreferredChannelStarboardHand: return "Buoy — Preferred Channel Starboard Hand"
-		case .buoyIsolatedDanger: return "Buoy — Isolated Danger"
-		case .buoySafeWater: return "Buoy — Safe Water"
+		case .defaultUnspecified: return String(localized: "Unspecified", bundle: .module)
+		case .referencePoint: return String(localized: "Reference Point", bundle: .module)
+		case .racon: return String(localized: "RACON", bundle: .module)
+		case .fixedStructure: return String(localized: "Fixed Structure", bundle: .module)
+		case .spare4: return String(localized: "Spare", bundle: .module)
+		case .lightNoSectors: return String(localized: "Light (no sectors)", bundle: .module)
+		case .lightWithSectors: return String(localized: "Light (with sectors)", bundle: .module)
+		case .leadingLightFront: return String(localized: "Leading Light — Front", bundle: .module)
+		case .leadingLightRear: return String(localized: "Leading Light — Rear", bundle: .module)
+		case .beaconCardinalN: return String(localized: "Beacon — Cardinal N", bundle: .module)
+		case .beaconCardinalE: return String(localized: "Beacon — Cardinal E", bundle: .module)
+		case .beaconCardinalS: return String(localized: "Beacon — Cardinal S", bundle: .module)
+		case .beaconCardinalW: return String(localized: "Beacon — Cardinal W", bundle: .module)
+		case .beaconPortHand: return String(localized: "Beacon — Port Hand", bundle: .module)
+		case .beaconStarboardHand: return String(localized: "Beacon — Starboard Hand", bundle: .module)
+		case .beaconPreferredChannelPortHand: return String(localized: "Beacon — Preferred Channel Port Hand", bundle: .module)
+		case .beaconPreferredChannelStarboardHand: return String(localized: "Beacon — Preferred Channel Starboard Hand", bundle: .module)
+		case .beaconIsolatedDanger: return String(localized: "Beacon — Isolated Danger", bundle: .module)
+		case .beaconSafeWater: return String(localized: "Beacon — Safe Water", bundle: .module)
+		case .beaconSpecialMark: return String(localized: "Beacon — Special Mark", bundle: .module)
+		case .beaconLightVessel: return String(localized: "Beacon — Light Vessel / LANBY", bundle: .module)
+		case .lanby: return String(localized: "LANBY", bundle: .module)
+		case .buoyCardinalN: return String(localized: "Buoy — Cardinal N", bundle: .module)
+		case .buoyCardinalE: return String(localized: "Buoy — Cardinal E", bundle: .module)
+		case .buoyCardinalS: return String(localized: "Buoy — Cardinal S", bundle: .module)
+		case .buoyCardinalW: return String(localized: "Buoy — Cardinal W", bundle: .module)
+		case .buoyPortHand: return String(localized: "Buoy — Port Hand", bundle: .module)
+		case .buoyStarboardHand: return String(localized: "Buoy — Starboard Hand", bundle: .module)
+		case .buoyPreferredChannelPortHand: return String(localized: "Buoy — Preferred Channel Port Hand", bundle: .module)
+		case .buoyPreferredChannelStarboardHand: return String(localized: "Buoy — Preferred Channel Starboard Hand", bundle: .module)
+		case .buoyIsolatedDanger: return String(localized: "Buoy — Isolated Danger", bundle: .module)
+		case .buoySafeWater: return String(localized: "Buoy — Safe Water", bundle: .module)
 		}
 	}
 }
@@ -668,9 +668,9 @@ public enum ManeuverIndicator: Int, Sendable, Equatable {
 	/// A human-readable label suitable for display.
 	public var label: String {
 		switch self {
-		case .notAvailable: return "Not Available"
-		case .noSpecial: return "No Special Manoeuvre"
-		case .specialManeuver: return "Special Manoeuvre"
+		case .notAvailable: return String(localized: "Not Available", bundle: .module)
+		case .noSpecial: return String(localized: "No Special Manoeuvre", bundle: .module)
+		case .specialManeuver: return String(localized: "Special Manoeuvre", bundle: .module)
 		}
 	}
 }
