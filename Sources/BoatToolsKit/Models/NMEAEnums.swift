@@ -349,22 +349,22 @@ public enum NavigationStatus: Int, Sendable, Equatable {
 	/// A human-readable label suitable for display.
 	public var label: String {
 		switch self {
-		case .underWayUsingEngine: return "Under Way Using Engine"
-		case .atAnchor: return "At Anchor"
-		case .notUnderCommand: return "Not Under Command"
-		case .restrictedManoeuvrability: return "Restricted Manoeuvrability"
-		case .constrainedByDraught: return "Constrained By Draught"
-		case .moored: return "Moored"
-		case .aground: return "Aground"
-		case .engagedInFishing: return "Engaged in Fishing"
-		case .underWaySailing: return "Under Way Sailing"
-		case .reservedHSC: return "Reserved — HSC"
-		case .reservedWIG: return "Reserved — WIG"
-		case .powerDrivenVesselTowing: return "Power-Driven Vessel Towing Astern"
-		case .powerDrivenVesselPushing: return "Power-Driven Vessel Pushing Ahead"
-		case .reserved13: return "Reserved"
-		case .aisSearchAndRescue: return "AIS-SART / MOB / EPIRB"
-		case .undefined: return "Undefined"
+		case .underWayUsingEngine: return localizedLabel("Under Way Using Engine")
+		case .atAnchor: return localizedLabel("At Anchor")
+		case .notUnderCommand: return localizedLabel("Not Under Command")
+		case .restrictedManoeuvrability: return localizedLabel("Restricted Manoeuvrability")
+		case .constrainedByDraught: return localizedLabel("Constrained By Draught")
+		case .moored: return localizedLabel("Moored")
+		case .aground: return localizedLabel("Aground")
+		case .engagedInFishing: return localizedLabel("Engaged in Fishing")
+		case .underWaySailing: return localizedLabel("Under Way Sailing")
+		case .reservedHSC: return localizedLabel("Reserved — HSC")
+		case .reservedWIG: return localizedLabel("Reserved — WIG")
+		case .powerDrivenVesselTowing: return localizedLabel("Power-Driven Vessel Towing Astern")
+		case .powerDrivenVesselPushing: return localizedLabel("Power-Driven Vessel Pushing Ahead")
+		case .reserved13: return localizedLabel("Reserved")
+		case .aisSearchAndRescue: return localizedLabel("AIS-SART / MOB / EPIRB")
+		case .undefined: return localizedLabel("Undefined")
 		}
 	}
 }
@@ -444,79 +444,79 @@ public enum ShipType: Int, Sendable, Equatable {
 	/// A human-readable label suitable for display.
 	public var label: String {
 		switch self {
-		case .notAvailable: return "Not Available"
-		case .wingInGround: return "Wing In Ground"
-		case .wingInGroundHazardousA: return "WIG — Hazardous Cat A"
-		case .wingInGroundHazardousB: return "WIG — Hazardous Cat B"
-		case .wingInGroundHazardousC: return "WIG — Hazardous Cat C"
-		case .wingInGroundHazardousD: return "WIG — Hazardous Cat D"
-		case .fishing: return "Fishing"
-		case .towing: return "Towing"
-		case .towingLarge: return "Towing — Large"
-		case .dredgingOrUnderwaterOps: return "Dredging / Underwater Ops"
-		case .divingOps: return "Diving Operations"
-		case .militaryOps: return "Military Operations"
-		case .sailing: return "Sailing"
-		case .pleasureCraft: return "Pleasure Craft"
-		case .highSpeedCraft: return "High Speed Craft"
-		case .highSpeedCraftHazardousA: return "HSC — Hazardous Cat A"
-		case .highSpeedCraftHazardousB: return "HSC — Hazardous Cat B"
-		case .highSpeedCraftHazardousC: return "HSC — Hazardous Cat C"
-		case .highSpeedCraftHazardousD: return "HSC — Hazardous Cat D"
-		case .pilotVessel: return "Pilot Vessel"
-		case .searchAndRescue: return "Search and Rescue"
-		case .tug: return "Tug"
-		case .portTender: return "Port Tender"
-		case .antiPollution: return "Anti-Pollution Equipment"
-		case .lawEnforcement: return "Law Enforcement"
-		case .localVessel56: return "Local Vessel"
-		case .localVessel57: return "Local Vessel"
-		case .medicalTransport: return "Medical Transport"
-		case .noncombatantShip: return "Noncombatant Ship"
-		case .passenger: return "Passenger"
-		case .passengerHazardousA: return "Passenger — Hazardous Cat A"
-		case .passengerHazardousB: return "Passenger — Hazardous Cat B"
-		case .passengerHazardousC: return "Passenger — Hazardous Cat C"
-		case .passengerHazardousD: return "Passenger — Hazardous Cat D"
+		case .notAvailable: return localizedLabel("Not Available")
+		case .wingInGround: return localizedLabel("Wing In Ground")
+		case .wingInGroundHazardousA: return localizedLabel("WIG — Hazardous Cat A")
+		case .wingInGroundHazardousB: return localizedLabel("WIG — Hazardous Cat B")
+		case .wingInGroundHazardousC: return localizedLabel("WIG — Hazardous Cat C")
+		case .wingInGroundHazardousD: return localizedLabel("WIG — Hazardous Cat D")
+		case .fishing: return localizedLabel("Fishing")
+		case .towing: return localizedLabel("Towing")
+		case .towingLarge: return localizedLabel("Towing — Large")
+		case .dredgingOrUnderwaterOps: return localizedLabel("Dredging / Underwater Ops")
+		case .divingOps: return localizedLabel("Diving Operations")
+		case .militaryOps: return localizedLabel("Military Operations")
+		case .sailing: return localizedLabel("Sailing")
+		case .pleasureCraft: return localizedLabel("Pleasure Craft")
+		case .highSpeedCraft: return localizedLabel("High Speed Craft")
+		case .highSpeedCraftHazardousA: return localizedLabel("HSC — Hazardous Cat A")
+		case .highSpeedCraftHazardousB: return localizedLabel("HSC — Hazardous Cat B")
+		case .highSpeedCraftHazardousC: return localizedLabel("HSC — Hazardous Cat C")
+		case .highSpeedCraftHazardousD: return localizedLabel("HSC — Hazardous Cat D")
+		case .pilotVessel: return localizedLabel("Pilot Vessel")
+		case .searchAndRescue: return localizedLabel("Search and Rescue")
+		case .tug: return localizedLabel("Tug")
+		case .portTender: return localizedLabel("Port Tender")
+		case .antiPollution: return localizedLabel("Anti-Pollution Equipment")
+		case .lawEnforcement: return localizedLabel("Law Enforcement")
+		case .localVessel56: return localizedLabel("Local Vessel")
+		case .localVessel57: return localizedLabel("Local Vessel")
+		case .medicalTransport: return localizedLabel("Medical Transport")
+		case .noncombatantShip: return localizedLabel("Noncombatant Ship")
+		case .passenger: return localizedLabel("Passenger")
+		case .passengerHazardousA: return localizedLabel("Passenger — Hazardous Cat A")
+		case .passengerHazardousB: return localizedLabel("Passenger — Hazardous Cat B")
+		case .passengerHazardousC: return localizedLabel("Passenger — Hazardous Cat C")
+		case .passengerHazardousD: return localizedLabel("Passenger — Hazardous Cat D")
 		case .passengerReserved65,
 			.passengerReserved66,
 			.passengerReserved67,
 			.passengerReserved68:
-			return "Passenger — Reserved"
-		case .passengerNoAdditional: return "Passenger"
-		case .cargo: return "Cargo"
-		case .cargoHazardousA: return "Cargo — Hazardous Cat A"
-		case .cargoHazardousB: return "Cargo — Hazardous Cat B"
-		case .cargoHazardousC: return "Cargo — Hazardous Cat C"
-		case .cargoHazardousD: return "Cargo — Hazardous Cat D"
+			return localizedLabel("Passenger — Reserved")
+		case .passengerNoAdditional: return localizedLabel("Passenger")
+		case .cargo: return localizedLabel("Cargo")
+		case .cargoHazardousA: return localizedLabel("Cargo — Hazardous Cat A")
+		case .cargoHazardousB: return localizedLabel("Cargo — Hazardous Cat B")
+		case .cargoHazardousC: return localizedLabel("Cargo — Hazardous Cat C")
+		case .cargoHazardousD: return localizedLabel("Cargo — Hazardous Cat D")
 		case .cargoReserved75,
 			.cargoReserved76,
 			.cargoReserved77,
 			.cargoReserved78:
-			return "Cargo — Reserved"
-		case .cargoNoAdditional: return "Cargo"
-		case .tanker: return "Tanker"
-		case .tankerHazardousA: return "Tanker — Hazardous Cat A"
-		case .tankerHazardousB: return "Tanker — Hazardous Cat B"
-		case .tankerHazardousC: return "Tanker — Hazardous Cat C"
-		case .tankerHazardousD: return "Tanker — Hazardous Cat D"
+			return localizedLabel("Cargo — Reserved")
+		case .cargoNoAdditional: return localizedLabel("Cargo")
+		case .tanker: return localizedLabel("Tanker")
+		case .tankerHazardousA: return localizedLabel("Tanker — Hazardous Cat A")
+		case .tankerHazardousB: return localizedLabel("Tanker — Hazardous Cat B")
+		case .tankerHazardousC: return localizedLabel("Tanker — Hazardous Cat C")
+		case .tankerHazardousD: return localizedLabel("Tanker — Hazardous Cat D")
 		case .tankerReserved85,
 			.tankerReserved86,
 			.tankerReserved87,
 			.tankerReserved88:
-			return "Tanker — Reserved"
-		case .tankerNoAdditional: return "Tanker"
-		case .otherType: return "Other"
-		case .otherHazardousA: return "Other — Hazardous Cat A"
-		case .otherHazardousB: return "Other — Hazardous Cat B"
-		case .otherHazardousC: return "Other — Hazardous Cat C"
-		case .otherHazardousD: return "Other — Hazardous Cat D"
+			return localizedLabel("Tanker — Reserved")
+		case .tankerNoAdditional: return localizedLabel("Tanker")
+		case .otherType: return localizedLabel("Other")
+		case .otherHazardousA: return localizedLabel("Other — Hazardous Cat A")
+		case .otherHazardousB: return localizedLabel("Other — Hazardous Cat B")
+		case .otherHazardousC: return localizedLabel("Other — Hazardous Cat C")
+		case .otherHazardousD: return localizedLabel("Other — Hazardous Cat D")
 		case .otherReserved95,
 			.otherReserved96,
 			.otherReserved97,
 			.otherReserved98:
-			return "Other — Reserved"
-		case .otherNoAdditional: return "Other"
+			return localizedLabel("Other — Reserved")
+		case .otherNoAdditional: return localizedLabel("Other")
 		}
 	}
 }
@@ -623,38 +623,38 @@ public enum NavigationalAidType: Int, Sendable, Equatable {
 	/// A human-readable label suitable for display.
 	public var label: String {
 		switch self {
-		case .defaultUnspecified: return "Unspecified"
-		case .referencePoint: return "Reference Point"
-		case .racon: return "RACON"
-		case .fixedStructure: return "Fixed Structure"
-		case .spare4: return "Spare"
-		case .lightNoSectors: return "Light (no sectors)"
-		case .lightWithSectors: return "Light (with sectors)"
-		case .leadingLightFront: return "Leading Light — Front"
-		case .leadingLightRear: return "Leading Light — Rear"
-		case .beaconCardinalN: return "Beacon — Cardinal N"
-		case .beaconCardinalE: return "Beacon — Cardinal E"
-		case .beaconCardinalS: return "Beacon — Cardinal S"
-		case .beaconCardinalW: return "Beacon — Cardinal W"
-		case .beaconPortHand: return "Beacon — Port Hand"
-		case .beaconStarboardHand: return "Beacon — Starboard Hand"
-		case .beaconPreferredChannelPortHand: return "Beacon — Preferred Channel Port Hand"
-		case .beaconPreferredChannelStarboardHand: return "Beacon — Preferred Channel Starboard Hand"
-		case .beaconIsolatedDanger: return "Beacon — Isolated Danger"
-		case .beaconSafeWater: return "Beacon — Safe Water"
-		case .beaconSpecialMark: return "Beacon — Special Mark"
-		case .beaconLightVessel: return "Beacon — Light Vessel / LANBY"
-		case .lanby: return "LANBY"
-		case .buoyCardinalN: return "Buoy — Cardinal N"
-		case .buoyCardinalE: return "Buoy — Cardinal E"
-		case .buoyCardinalS: return "Buoy — Cardinal S"
-		case .buoyCardinalW: return "Buoy — Cardinal W"
-		case .buoyPortHand: return "Buoy — Port Hand"
-		case .buoyStarboardHand: return "Buoy — Starboard Hand"
-		case .buoyPreferredChannelPortHand: return "Buoy — Preferred Channel Port Hand"
-		case .buoyPreferredChannelStarboardHand: return "Buoy — Preferred Channel Starboard Hand"
-		case .buoyIsolatedDanger: return "Buoy — Isolated Danger"
-		case .buoySafeWater: return "Buoy — Safe Water"
+		case .defaultUnspecified: return localizedLabel("Unspecified")
+		case .referencePoint: return localizedLabel("Reference Point")
+		case .racon: return localizedLabel("RACON")
+		case .fixedStructure: return localizedLabel("Fixed Structure")
+		case .spare4: return localizedLabel("Spare")
+		case .lightNoSectors: return localizedLabel("Light (no sectors)")
+		case .lightWithSectors: return localizedLabel("Light (with sectors)")
+		case .leadingLightFront: return localizedLabel("Leading Light — Front")
+		case .leadingLightRear: return localizedLabel("Leading Light — Rear")
+		case .beaconCardinalN: return localizedLabel("Beacon — Cardinal N")
+		case .beaconCardinalE: return localizedLabel("Beacon — Cardinal E")
+		case .beaconCardinalS: return localizedLabel("Beacon — Cardinal S")
+		case .beaconCardinalW: return localizedLabel("Beacon — Cardinal W")
+		case .beaconPortHand: return localizedLabel("Beacon — Port Hand")
+		case .beaconStarboardHand: return localizedLabel("Beacon — Starboard Hand")
+		case .beaconPreferredChannelPortHand: return localizedLabel("Beacon — Preferred Channel Port Hand")
+		case .beaconPreferredChannelStarboardHand: return localizedLabel("Beacon — Preferred Channel Starboard Hand")
+		case .beaconIsolatedDanger: return localizedLabel("Beacon — Isolated Danger")
+		case .beaconSafeWater: return localizedLabel("Beacon — Safe Water")
+		case .beaconSpecialMark: return localizedLabel("Beacon — Special Mark")
+		case .beaconLightVessel: return localizedLabel("Beacon — Light Vessel / LANBY")
+		case .lanby: return localizedLabel("LANBY")
+		case .buoyCardinalN: return localizedLabel("Buoy — Cardinal N")
+		case .buoyCardinalE: return localizedLabel("Buoy — Cardinal E")
+		case .buoyCardinalS: return localizedLabel("Buoy — Cardinal S")
+		case .buoyCardinalW: return localizedLabel("Buoy — Cardinal W")
+		case .buoyPortHand: return localizedLabel("Buoy — Port Hand")
+		case .buoyStarboardHand: return localizedLabel("Buoy — Starboard Hand")
+		case .buoyPreferredChannelPortHand: return localizedLabel("Buoy — Preferred Channel Port Hand")
+		case .buoyPreferredChannelStarboardHand: return localizedLabel("Buoy — Preferred Channel Starboard Hand")
+		case .buoyIsolatedDanger: return localizedLabel("Buoy — Isolated Danger")
+		case .buoySafeWater: return localizedLabel("Buoy — Safe Water")
 		}
 	}
 }
@@ -668,9 +668,9 @@ public enum ManeuverIndicator: Int, Sendable, Equatable {
 	/// A human-readable label suitable for display.
 	public var label: String {
 		switch self {
-		case .notAvailable: return "Not Available"
-		case .noSpecial: return "No Special Manoeuvre"
-		case .specialManeuver: return "Special Manoeuvre"
+		case .notAvailable: return localizedLabel("Not Available")
+		case .noSpecial: return localizedLabel("No Special Manoeuvre")
+		case .specialManeuver: return localizedLabel("Special Manoeuvre")
 		}
 	}
 }

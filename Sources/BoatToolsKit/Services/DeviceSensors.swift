@@ -62,6 +62,9 @@
 		private let config: DeviceSensorsConfig
 		private let manager = CLLocationManager()
 		private var continuation: AsyncThrowingStream<BoatMetric, any Error>.Continuation?
+		/// Whether location updates have been asked for, so the authorisation
+		/// callback — which can fire more than once — starts them only once.
+		private var isUpdatingLocation = false
 
 		// CMAltimeter lives in CoreMotion, which is importable on macOS and tvOS,
 		// but Apple marks the class @unavailable on those two platforms in the SDK
@@ -90,15 +93,11 @@
 				// macOS 10.15+, tvOS — covers every platform under canImport(CoreLocation).
 				manager.requestWhenInUseAuthorization()
 
-				if config.gps {
-					manager.desiredAccuracy = kCLLocationAccuracyBest
-					#if os(tvOS)
-						// tvOS has no continuous location updates — request a single fix.
-						manager.requestLocation()
-					#else
-						manager.startUpdatingLocation()
-					#endif
-				}
+				// On a fresh install the answer arrives long after this call, so
+				// location updates wait for it — asking and starting in the same
+				// breath left the first launch with no position at all, and no
+				// second chance once permission was granted.
+				startLocationIfAuthorised()
 
 				// Heading: startUpdatingHeading() is unavailable on macOS and tvOS
 				// (no compass hardware, API_UNAVAILABLE in the SDK).  Negative guard
@@ -146,6 +145,10 @@
 		}
 
 		private func stopAll() {
+			// So a later stream starts its updates again rather than believing
+			// they are already running.
+			isUpdatingLocation = false
+			continuation = nil
 			#if !os(tvOS)
 				manager.stopUpdatingLocation()
 			#endif
@@ -190,6 +193,44 @@
 			}
 			if loc.course >= 0 {
 				cont.yield(BoatMetric(name: "COG", value: loc.course, unit: "°", timestamp: ts))
+			}
+		}
+
+		/// Starts location updates once, when the user has said yes.
+		///
+		/// Called both from ``stream()`` — for a session that already has
+		/// permission — and from the authorisation callback, for the first launch
+		/// where the answer comes later.
+		private func startLocationIfAuthorised() {
+			guard config.gps, continuation != nil, !isUpdatingLocation else { return }
+			switch manager.authorizationStatus {
+			case .notDetermined:
+				return  // the prompt is still up; the callback will bring us back
+			case .denied, .restricted:
+				return  // reported from the callback, which knows it just changed
+			default:
+				break
+			}
+			isUpdatingLocation = true
+			manager.desiredAccuracy = kCLLocationAccuracyBest
+			#if os(tvOS)
+				// tvOS has no continuous location updates — request a single fix.
+				manager.requestLocation()
+			#else
+				manager.startUpdatingLocation()
+			#endif
+		}
+
+		/// Starts the sensors, or ends the stream, once the user has answered.
+		public func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+			switch manager.authorizationStatus {
+			case .notDetermined:
+				break
+			case .denied, .restricted:
+				continuation?.finish(
+					throwing: BoatCloudError.transport("CoreLocation: location access refused"))
+			default:
+				startLocationIfAuthorised()
 			}
 		}
 

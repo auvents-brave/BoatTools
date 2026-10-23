@@ -116,6 +116,9 @@ let package = Package(
 			name: "BoatToolsKit",
 			dependencies: boatToolsKitDeps,
 			path: "Sources/BoatToolsKit",
+			// The AIS labels this kit returns are read by people, so they are
+			// translated here rather than by every app that shows them.
+			resources: [.process("Resources")],
 			swiftSettings: sharedSwiftSettings
 		),
 		.executableTarget(
