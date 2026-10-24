@@ -117,15 +117,22 @@
 				// (e.g. older Apple Watch models without a barometer).
 				#if canImport(CoreMotion) && !os(macOS) && !os(tvOS) && !os(visionOS)
 					if config.barometer && CMAltimeter.isRelativeAltitudeAvailable() {
-						// Capture the continuation, never `self`. CoreMotion does not
-						// always honour the queue asked for: a crash report showed this
-						// block arriving through the permission path
-						// (`tccServiceMotionAccessAllowingMac:`) on a dispatch queue
-						// rather than the main one. Reading `self.continuation` there
-						// touches @MainActor state off the main actor, which Swift 6
-						// checks at runtime and terminates the process over. The
-						// continuation is `Sendable`, so the block needs no actor at all.
-						altimeter.startRelativeAltitudeUpdates(to: .main) { data, _ in
+						// `@Sendable`, and capturing the continuation rather than
+						// `self`, because CoreMotion does not always honour the queue
+						// asked for: crash reports show this block arriving through the
+						// permission path (`tccServiceMotionAccessAllowingMac:`) on a
+						// dispatch queue of its own rather than the main one.
+						//
+						// Dropping the `self` capture was not enough on its own — a
+						// closure's isolation comes from where it is written, not from
+						// what it captures, and `DeviceSensors` is `@MainActor`, so the
+						// block inherited that isolation and Swift checked the executor
+						// on entry. Off the main queue the check fails and takes the
+						// process with it (`_dispatch_assert_queue_fail`). `@Sendable`
+						// makes the block non-isolated, so there is no check to fail;
+						// the continuation is itself `Sendable` and safe to yield to
+						// from any thread.
+						altimeter.startRelativeAltitudeUpdates(to: .main) { @Sendable data, _ in
 							guard let p = data?.pressure else { return }
 							// CMAltimeter gives kPa; canonical unit is hPa (= mbar).
 							// 1 kPa = 10 hPa → standard atmosphere 101.3 kPa = 1013 hPa.
