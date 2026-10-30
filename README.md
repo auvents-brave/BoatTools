@@ -15,7 +15,8 @@ Victron VRM, a recorded log replayed from disk, and a parametrable synthetic
 passage — all polled), a connection test that waits for the first data, a
 host-pushed device-sensor feed (position, heading, barometric pressure — for
 Android, Windows and Linux hosts that read their own hardware and push it in),
-AIS target details, Wikimedia vessel photographs, GMDSS forecasts, sun times, the NMEA 2000
+AIS target details, Wikimedia vessel photographs, GMDSS forecasts, sun times, the
+closest-point-of-approach arithmetic a collision watch runs on, the NMEA 2000
 device inventory with an ISO Request roll call, and autopilot / windlass
 commands — so non-Swift hosts (C# via P/Invoke, Python via
 ctypes…) reuse the same decoding, transports and commands instead of
@@ -206,6 +207,12 @@ frames to the clients and the metric store and let them dispatch.
 
 **Sun** — offline, no network, the same minutes on every platform.
 - `SunTimes` — sunrise, solar noon and sunset of a local day at a position (NOAA solar calculator algorithm, about a minute's accuracy up to ±72° latitude); `Horizon` selects the official events or civil / nautical / astronomical dawn and dusk; `polar` reports a day when the Sun neither rises nor sets. `SunTimes.upcoming(latitude:longitude:after:)` gives the next sunrise, solar noon and sunset as `SunEvent`s, soonest first — what the apps' Sun pill shows. The bridge exposes them as `boattools_bridge_sun_times` and `boattools_bridge_sun_upcoming`.
+
+**Collision watch** — the arithmetic behind a CPA/TCPA watch, and the rules that decide when one is worth raising. Shared so every app computes the same watch from the same figures rather than each carrying a version of its own.
+- `CollisionGeometry.approach(from:courseDeg:speedKnots:to:targetCourseDeg:targetSpeedKnots:)` — the closest point of approach between two vessels: how far apart they will be at it, and how many minutes from now. Worked on the local tangent plane from a range and bearing, which is accurate well past any range at which an AIS target matters. Returns `nil` when there is nothing to raise — the two hold their separation, or are already opening. A target reporting neither course nor speed is taken as stationary, which is what she is if she is moored or aground.
+- `CollisionGeometry.horizonMinutes` (30) — how far ahead an approach is worth raising; beyond it the picture will have changed many times over.
+- `CollisionGeometry.ownSpeedFloorKnots` (0.5) — below this a vessel is at anchor or alongside, and the watch stands down: everything passing up the fairway would otherwise have a closing approach on her.
+- `CollisionGeometry.clearanceFactor` (1.2) — how far past a limit a flagged target must go before she is cleared, so one sitting on the threshold does not flicker and re-notify on every refresh.
 
 **Parsing** — most parsers are internal. The one exposed type:
 - `NMEA0183Parser` — stateless sentence parser used by the CLI to filter decoded vs unknown sentence types. NMEA 2000, AIS, SeaSmart, Canboat, iKonvert and YD RAW decoders are reached indirectly through `NMEATransport`. Full decoder coverage in [`DECODERS.md`](DECODERS.md).
