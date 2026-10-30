@@ -43,7 +43,7 @@ jobs:
         if: matrix.platform == 'macos'
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: "26.5"
+          xcode-version: "27.2"
 
       - name: Install Swiftly (Linux)
         if: matrix.platform == 'linux'
