@@ -15,11 +15,9 @@ Victron VRM, a recorded log replayed from disk, and a parametrable synthetic
 passage — all polled), a connection test that waits for the first data, a
 host-pushed device-sensor feed (position, heading, barometric pressure — for
 Android, Windows and Linux hosts that read their own hardware and push it in),
-AIS target details, Wikimedia vessel photographs, GMDSS forecasts, sun times, the
-closest-point-of-approach arithmetic a collision watch runs on, the ESC/POS
-layout of a logbook roll, the NMEA 2000
-device inventory with an ISO Request roll call, and autopilot / windlass
-commands — so non-Swift hosts (C# via P/Invoke, Python via
+AIS target details, Wikimedia vessel photographs, GMDSS forecasts, sun times,
+the NMEA 2000 device inventory with an ISO Request roll call, and autopilot /
+windlass commands — so non-Swift hosts (C# via P/Invoke, Python via
 ctypes…) reuse the same decoding, transports and commands instead of
 reimplementing them. Build it with `swift build -c release` from `Bridge/`
 (on Windows, pass the CCurl include/lib flags as for the CLI); every
@@ -208,19 +206,6 @@ frames to the clients and the metric store and let them dispatch.
 
 **Sun** — offline, no network, the same minutes on every platform.
 - `SunTimes` — sunrise, solar noon and sunset of a local day at a position (NOAA solar calculator algorithm, about a minute's accuracy up to ±72° latitude); `Horizon` selects the official events or civil / nautical / astronomical dawn and dusk; `polar` reports a day when the Sun neither rises nor sets. `SunTimes.upcoming(latitude:longitude:after:)` gives the next sunrise, solar noon and sunset as `SunEvent`s, soonest first — what the apps' Sun pill shows. The bridge exposes them as `boattools_bridge_sun_times` and `boattools_bridge_sun_upcoming`.
-
-**Collision watch** — the arithmetic behind a CPA/TCPA watch, and the rules that decide when one is worth raising. Shared so every app computes the same watch from the same figures rather than each carrying a version of its own.
-- `CollisionGeometry.approach(from:courseDeg:speedKnots:to:targetCourseDeg:targetSpeedKnots:)` — the closest point of approach between two vessels: how far apart they will be at it, and how many minutes from now. Worked on the local tangent plane from a range and bearing, which is accurate well past any range at which an AIS target matters. Returns `nil` when there is nothing to raise — the two hold their separation, or are already opening. A target reporting neither course nor speed is taken as stationary, which is what she is if she is moored or aground.
-- `CollisionGeometry.horizonMinutes` (30) — how far ahead an approach is worth raising; beyond it the picture will have changed many times over.
-- `CollisionGeometry.ownSpeedFloorKnots` (0.5) — below this a vessel is at anchor or alongside, and the watch stands down: everything passing up the fairway would otherwise have a closing approach on her.
-- `CollisionGeometry.clearanceFactor` (1.2) — how far past a limit a flagged target must go before she is cleared, so one sitting on the threshold does not flicker and re-notify on every refresh.
-
-**Roll printer** — laying a logbook out for a thermal roll, and encoding it as ESC/POS. No transport: the host drives its own Bluetooth and sends what this hands it, so every app prints the same roll — and the layout can be tested without a printer, which matters for hardware that is rarely to hand.
-- `ReceiptLayout.columns(paperWidthMM:)` — 64 columns of Font B on 80 mm paper, 42 on anything narrower.
-- `ReceiptLayout.wrap(_:columns:)` — breaks a line on spaces where it can, mid-word only when one word is longer than the roll.
-- `ReceiptLayout.encode(_:)` / `.text(_:)` — Windows-1252, written out rather than taken from Foundation, whose encodings differ away from Apple's platforms. Accents survive; so do the curly quotes and dashes French copy is full of, which Latin-1 leaves to controls. A character the code page has no room for is dropped rather than garbled.
-- `ReceiptLayout.line(_:columns:)`, `.block(_:columns:)`, `.voyageHeader(_:columns:)`, `.columnHeader(_:columns:)` — the pieces of a roll: one truncated line, a wrapped block that keeps its blank lines, the framed voyage header, and column names under a dashed rule.
-- `ReceiptLayout.Control` — the ESC/POS sequences: reset, Font B, code page, line feed, `feed(_:)`, and the model-id query.
 
 **Parsing** — most parsers are internal. The one exposed type:
 - `NMEA0183Parser` — stateless sentence parser used by the CLI to filter decoded vs unknown sentence types. NMEA 2000, AIS, SeaSmart, Canboat, iKonvert and YD RAW decoders are reached indirectly through `NMEATransport`. Full decoder coverage in [`DECODERS.md`](DECODERS.md).
