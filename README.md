@@ -15,9 +15,9 @@ Victron VRM, a recorded log replayed from disk, and a parametrable synthetic
 passage — all polled), a connection test that waits for the first data, a
 host-pushed device-sensor feed (position, heading, barometric pressure — for
 Android, Windows and Linux hosts that read their own hardware and push it in),
-AIS target details, Wikimedia vessel photographs, GMDSS forecasts, sun times, the NMEA 2000
-device inventory with an ISO Request roll call, and autopilot / windlass
-commands — so non-Swift hosts (C# via P/Invoke, Python via
+AIS target details, Wikimedia vessel photographs, GMDSS forecasts, sun times,
+the NMEA 2000 device inventory with an ISO Request roll call, and autopilot /
+windlass commands — so non-Swift hosts (C# via P/Invoke, Python via
 ctypes…) reuse the same decoding, transports and commands instead of
 reimplementing them. Build it with `swift build -c release` from `Bridge/`
 (on Windows, pass the CCurl include/lib flags as for the CLI); every
