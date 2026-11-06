@@ -1,5 +1,6 @@
+// swift-tools-version: 6.1
+
 import Foundation
-// swift-tools-version:6.1
 import PackageDescription
 
 let sharedSwiftSettings: [SwiftSetting] = [
