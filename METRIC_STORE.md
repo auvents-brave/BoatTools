@@ -25,6 +25,7 @@ NMEATransport / SignalKClient
     ├── satellites: [String: [SatelliteInfo]] ← keyed by constellation name
     ├── WindHistory                          ← two-tier ring buffer (5 s / 1 min samples)
     ├── NavHistory (SOG, COG, depth, temp.water)  ← same two-tier scheme
+    ├── PerformanceHistory (vmgWind, leeway) ← same two-tier scheme
     └── PressureHistory                      ← single ring buffer (30 min samples, 48 h)
 ```
 
@@ -34,7 +35,7 @@ NMEATransport / SignalKClient
 - Some older instruments transmit both `APA` and `APB` for compatibility; we want to see both before deciding.
 - Multi-talker conflicts (two GPS sources) need to be resolved on the same data window.
 
-Within the window every received `BoatMetric` is tagged with its **source sentence / PGN / Signal K path**. At flush time the priority resolver picks one value per canonical metric name.
+Within the window every received `BoatMetric` is tagged with its **source sentence / PGN / Signal K path**. At flush time the priority resolver picks one value per canonical metric name, and drops the values whose source has stopped saying them (see [Value lifetime](#value-lifetime)).
 
 ---
 
@@ -192,6 +193,53 @@ This is the clearest example of the **backwards-compatibility pattern**: instrum
 | 4 | NMEA 0183 `BWC` / `BWR` |
 | 5 | Signal K `navigation.courseRhumbline.*` |
 
+`navigation.vmg` — the closing velocity on the active waypoint — also comes
+from `WCV`, which exists for nothing else and therefore ranks between `APB`
+and `RMB`.
+
+Every metric in this family is retired **15 seconds** after its last report,
+so a route read-out falls away with the destination: see
+[Value lifetime](#value-lifetime).
+
+---
+
+### 9b — Current, leeway and the sailing VMG
+
+Three quantities a source either states outright or not at all — nothing here
+is computed from the others.
+
+**Set and drift** (`navigation.currentSet`, `navigation.currentSet.magnetic`,
+`navigation.currentDrift`) — the set is the direction the water flows
+*towards*, the opposite convention to the wind:
+
+| Rank | Source |
+|------|--------|
+| 1 | PGN `129291` Set & Drift, Rapid Update |
+| 2 | PGN `130577` Direction Data |
+| 3 | NMEA 0183 `VDR` |
+| 4 | Signal K `environment.current.*` |
+
+**Leeway** (`navigation.leeway`), signed, the angle between the heading and the
+track through the water:
+
+| Rank | Source |
+|------|--------|
+| 1 | PGN `128000` Leeway Angle |
+| 2 | Signal K `navigation.leewayAngle` |
+
+**The sailing VMG** (`navigation.vmgWind`), signed, positive to windward — the
+component of the boat's speed along the wind axis:
+
+| Rank | Source |
+|------|--------|
+| 1 | NMEA 0183 `VPW` |
+| 2 | Signal K `performance.velocityMadeGood` |
+
+> No PGN carries the sailing VMG. The whole canboat database holds exactly one
+> VMG-like field, the Waypoint Closing Velocity of PGN `129284`, which is the
+> other quantity — `navigation.vmg`. On NMEA 2000 alone, `navigation.vmgWind`
+> stays absent, and the apps show no sailing VMG rather than inventing one.
+
 ---
 
 ### 10 — Atmosphere / environment
@@ -208,6 +256,30 @@ This is the clearest example of the **backwards-compatibility pattern**: instrum
 ### 11 — Engine, battery, tanks
 
 No conflicts expected (each metric is keyed by instance index). Pass through directly.
+
+---
+
+## Value lifetime
+
+A value is normally published until the source is dropped: an echo sounder that
+goes quiet has not said the water got deeper, and the last sounding beats
+nothing at all.
+
+The `navigation.` family is the exception. A plotter does not announce that the
+navigator has deactivated the destination — it simply stops broadcasting the
+route sentences. Without a horizon, a closing velocity on a waypoint nobody is
+steering for would sit frozen on the display for the rest of the passage. So
+every `navigation.` metric is retired **15 seconds** after its last report,
+dropped at the flush that notices it. Each member of the family is repeated at
+least every few seconds while it is live, so the horizon is generous.
+
+| Prefix | Lifetime after the last report |
+|---|---|
+| `navigation.` | 15 s |
+| everything else | until `clear()` |
+
+A read-out therefore falls away with the destination and comes back the moment
+one is activated, with no special case anywhere in the UI.
 
 ---
 
@@ -245,6 +317,7 @@ The `metrics` dict holds **every** `BoatMetric` produced by the priority resolve
 | Battery (per instance) | `battery.0.voltage`, `battery.0.soc`, … |
 | Tanks (per instance) | `fuel.0.level`, `water.0.level`, `blackwater.0.level`, … |
 | Autopilot / routing | `navigation.xte`, `navigation.bearingToDest`, `navigation.distanceToWaypoint`, `navigation.vmg` |
+| Performance | `navigation.vmgWind`, `navigation.currentSet`, `navigation.currentSet.magnetic`, `navigation.currentDrift`, `navigation.leeway` |
 | Waypoint | `waypoint.lat`, `waypoint.lon` |
 | Log | `log.total`, `log.trip` |
 | Time | `utc.timestamp` |
@@ -314,8 +387,12 @@ Each tier is a **ring buffer**. The 5-second tier accumulates raw values and flu
 | `COG` | Course over ground (circular mean) |
 | `depth` | Water depth |
 | `temperature.water` | Water temperature |
+| `navigation.vmgWind` | The sailing VMG (arithmetic mean — a signed speed) |
+| `navigation.leeway` | Leeway angle (arithmetic mean, **not** circular) |
 
 > `depth` and `temperature.water` are included: depth trend matters near shoaling water; water temperature matters for current boundaries.
+>
+> `navigation.vmgWind` and `navigation.leeway` are the two performance curves: whether a change of trim or of course actually paid is a question about the last hour, not about the current second. Both are signed and both are averaged arithmetically — a circular mean would read a leeway of −6° as 354°.
 
 ### Pressure history
 
@@ -356,6 +433,7 @@ Everything described above is implemented in `BoatToolsKit`:
 - `FrameCollector` and `PriorityResolver` (internal) drive the 1-second window and produce a `FlushResult` on each tick.
 - `RingBuffer<T>`, `TieredHistory`, `PressureHistory` are public history primitives.
 - `BoatMetricStore.isStale(_:)` reports staleness; targets older than 10 minutes are flagged, 30 minutes removed.
+- `PriorityResolver.lifetime(for:)` gives each metric its horizon; the flush drops the values past it.
 - The Darwin AppGroup JSON snapshot is written from `BoatMetricStore.flushSharedDefaults()` whenever a non-nil `appGroupID` was passed to `init`.
 
 To feed the store from a transport, use one of the async-stream piping helpers on `BoatMetricStore`:

@@ -52,6 +52,8 @@ Inventory of the NMEA 0183 sentences, NMEA 2000 PGNs, and Signal K paths recogni
 | `VBW` | Dual Ground/Water Speed | `STW` (longitudinal water), `SOG` (longitudinal ground), `speed.water.transverse`, `speed.ground.transverse` — each pair gated on its A/V status flag. Longitudinal components feed the canonical `STW`/`SOG` (resolved against VHW/VTG/RMC by priority); the transverse components (leeway) are unique to VBW. |
 | `MTW` | Water Temperature | `temperature.water` (Fahrenheit values are converted to Celsius) |
 | `VLW` | Distance Through Water | `log.total`, `log.trip` |
+| `VDR` | Set and Drift | `navigation.currentSet` (true), `navigation.currentSet.magnetic`, `navigation.currentDrift` — the set is the direction the water flows **towards**, the opposite convention to the wind. The magnetic field keeps its own name so the store can fall back to it exactly as it does for heading. |
+| `VPW` | Speed Measured Parallel to Wind | `navigation.vmgWind` — the sailing VMG, signed, positive to windward. The only sentence on either wire that carries it; a different quantity from `navigation.vmg`, the closing velocity on a waypoint. |
 
 ### Weather / atmosphere
 
@@ -69,6 +71,7 @@ Inventory of the NMEA 0183 sentences, NMEA 2000 PGNs, and Signal K paths recogni
 | `APA` | Autopilot Sentence A (older form of APB) | `navigation.xte`, `navigation.bearingOriginToDest` |
 | `APB` | Autopilot Sentence B | `navigation.xte`, `navigation.bearingOriginToDest`, `navigation.bearingToDest`, `navigation.headingToSteer` |
 | `RMB` | Recommended Minimum Navigation Information | `navigation.xte`, `waypoint.lat`, `waypoint.lon`, `navigation.distanceToWaypoint`, `navigation.bearingToDest`, `navigation.vmg` |
+| `WCV` | Waypoint Closure Velocity | `navigation.vmg` — the same quantity `RMB` carries in field 12, from a sentence that exists for nothing else, so it outranks `RMB` |
 | `RSA` | Rudder Sensor Angle | `rudder`, `rudder.port` (dual-rudder vessels) |
 | `BWC` | Bearing & Distance to Waypoint, Great Circle | `waypoint.lat`, `waypoint.lon`, `navigation.bearingToDest`, `navigation.bearingToDest.magnetic`, `navigation.distanceToWaypoint` |
 | `BWR` | Bearing & Distance to Waypoint, Rhumb Line | same fields as `BWC` (rhumb-line calculation) |
@@ -199,6 +202,9 @@ PGNs larger than 8 bytes (fast-packet) are reassembled across multiple CAN frame
 | `128259` | Speed | `STW`, `SOG` (when the ground-reference field is present) |
 | `128267` | Water Depth | `depth`, `depth.offset` (transducer-to-keel or surface-to-transducer correction), `depth.range` (transducer max scan range) |
 | `128275` | Distance Log | `log.total`, `log.trip` |
+| `128000` | Leeway Angle | `navigation.leeway` (signed, int16 × 1e-4 rad → °). The only PGN that states it; no 0183 sentence does. |
+| `129291` | Set & Drift, Rapid Update | `navigation.currentSet` or `navigation.currentSet.magnetic` (per the 2-bit set reference), `navigation.currentDrift` |
+| `130577` | Direction Data | `COG` / `COG.magnetic` (per the reference field), `SOG`, `HDG.true`, `STW`, `navigation.currentSet`, `navigation.currentDrift` — the same current among five other fields, so it ranks below `129291` |
 
 ### Wind
 
@@ -323,6 +329,11 @@ Signal K's canonical SI units are systematically converted to BoatTools' nautica
 | `navigation.courseRhumbline.bearingToDestinationTrue` | `navigation.bearingToDest` | rad → ° |
 | `navigation.courseRhumbline.nextPoint.distance` (and `courseGreatCircle…`) | `navigation.distanceToWaypoint` | m → NM |
 | `navigation.courseRhumbline.nextPoint.velocityMadeGood` (and `courseGreatCircle…`) | `navigation.vmg` | m/s × 1.94384 |
+| `environment.current.setTrue` | `navigation.currentSet` | rad → ° |
+| `environment.current.setMagnetic` | `navigation.currentSet.magnetic` | rad → ° |
+| `environment.current.drift` | `navigation.currentDrift` | m/s × 1.94384 |
+| `navigation.leewayAngle` | `navigation.leeway` | rad → ° |
+| `performance.velocityMadeGood` | `navigation.vmgWind` | m/s × 1.94384 |
 | `steering.autopilot.target.headingTrue` | `navigation.headingToSteer` | rad → ° |
 | `navigation.datetime` | `utc.timestamp` | — |
 
@@ -428,7 +439,11 @@ Reverse view: for every canonical metric emitted by BoatTools, the protocols tha
 | `navigation.bearingNextLeg` (+ `.magnetic`) | `BWW` | — | — |
 | `navigation.headingToSteer` | `APB` | — | `steering.autopilot.target.headingTrue` |
 | `navigation.distanceToWaypoint` | `BWC`, `BWR`, `RMB` | `129284` | `navigation.courseRhumbline.nextPoint.distance` |
-| `navigation.vmg` | `RMB` | `129284` | `navigation.courseRhumbline.nextPoint.velocityMadeGood` |
+| `navigation.vmg` | `RMB`, `WCV` | `129284` | `navigation.courseRhumbline.nextPoint.velocityMadeGood` |
+| `navigation.vmgWind` | `VPW` | — | `performance.velocityMadeGood` |
+| `navigation.currentSet` (+ `.magnetic`) | `VDR` | `129291`, `130577` | `environment.current.setTrue` / `…setMagnetic` |
+| `navigation.currentDrift` | `VDR` | `129291`, `130577` | `environment.current.drift` |
+| `navigation.leeway` | — | `128000` | `navigation.leewayAngle` |
 | `waypoint.lat` / `waypoint.lon` | `WPL`, `BWC`, `BWR`, `RMB` | `129284` | `navigation.*.nextPoint.position` |
 | `weatherStation.lat` / `weatherStation.lon` | — | `130323` | — |
 | `route.id` / `route.waypointsInMessage` | `RTE` | — | — |
