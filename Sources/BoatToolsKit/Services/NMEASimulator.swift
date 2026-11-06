@@ -255,9 +255,9 @@ public enum NMEASimulator {
 		}
 	}
 
-	/// Builds synthetic past samples for the wind and pressure curves, so a fresh
-	/// simulated session shows full graphs from the first second instead of empty
-	/// axes that fill in slowly.
+	/// Builds synthetic past samples for the wind, performance and pressure
+	/// curves, so a fresh simulated session shows full graphs from the first
+	/// second instead of empty axes that fill in slowly.
 	///
 	/// The samples extend the same deterministic environmental model backwards in
 	/// time, so they join the live feed seamlessly. Wind covers the last hour at
@@ -281,6 +281,8 @@ public enum NMEASimulator {
 		var twd: [HistorySample] = []
 		var aws: [HistorySample] = []
 		var awa: [HistorySample] = []
+		var vmgWind: [HistorySample] = []
+		var leeway: [HistorySample] = []
 		let windStep = 5.0
 		for k in stride(from: 720, through: 0, by: -1) {
 			let n = Double(-k) * windStep
@@ -294,6 +296,13 @@ public enum NMEASimulator {
 			tws.append(HistorySample(at: t, value: speed))
 			aws.append(HistorySample(at: t, value: apparent.speed))
 			awa.append(HistorySample(at: t, value: apparent.angle))
+			// The past is not re-sailed, so the stream is left out here and the
+			// speed through water stands in for the speed over ground.
+			vmgWind.append(
+				HistorySample(
+					at: t,
+					value: v * cos(twaRadians(heading: heading, trueWindDirection: direction))))
+			leeway.append(HistorySample(at: t, value: leewayDegrees(n)))
 		}
 
 		var pressure: [HistorySample] = []
@@ -306,6 +315,7 @@ public enum NMEASimulator {
 
 		return [
 			"TWS": tws, "TWD": twd, "AWS": aws, "AWA": awa,
+			"navigation.vmgWind": vmgWind, "navigation.leeway": leeway,
 			"pressure.atmospheric": pressure,
 		]
 	}
@@ -653,7 +663,7 @@ public enum NMEASimulator {
 
 	/// The true wind angle off the bow in radians, signed, from the heading and
 	/// the direction the wind blows from.
-	private static func twaRadians(heading: Double, trueWindDirection twd: Double) -> Double {
+	static func twaRadians(heading: Double, trueWindDirection twd: Double) -> Double {
 		var twa = (twd - heading).truncatingRemainder(dividingBy: 360)
 		if twa > 180 { twa -= 360 } else if twa < -180 { twa += 360 }
 		return twa * .pi / 180

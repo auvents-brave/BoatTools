@@ -1,8 +1,9 @@
 public import Foundation
 
 /// The curve histories kept for the metrics worth charting — wind, speed and
-/// course over ground, depth, water temperature and pressure — keyed by metric
-/// name, so every host smooths and retains them the same way.
+/// course over ground, depth, water temperature, pressure, the sailing VMG and
+/// the leeway — keyed by metric name, so every host smooths and retains them
+/// the same way.
 public struct MetricHistories: Sendable {
 	/// True wind speed — 5 s / 1 min two-tier history.
 	public private(set) var windTWS = TieredHistory(isAngle: false)
@@ -20,12 +21,19 @@ public struct MetricHistories: Sendable {
 	public private(set) var depth = TieredHistory(isAngle: false)
 	/// Water temperature — 5 s / 1 min two-tier history.
 	public private(set) var waterTemp = TieredHistory(isAngle: false)
+	/// Speed made good along the wind axis — 5 s / 1 min two-tier history.
+	public private(set) var vmgWind = TieredHistory(isAngle: false)
+	/// Leeway angle — 5 s / 1 min two-tier history. Averaged arithmetically,
+	/// not around the circle: leeway is a small signed angle either side of the
+	/// heading, and a circular mean would turn −6° into 354°.
+	public private(set) var leeway = TieredHistory(isAngle: false)
 	/// Atmospheric pressure — 30 min samples over 48 hours.
 	public private(set) var pressure = PressureHistory()
 
 	/// The metric names that have a history.
 	public static let names: [String] = [
 		"TWS", "TWD", "AWS", "AWA", "SOG", "COG", "depth", "temperature.water", "pressure.atmospheric",
+		"navigation.vmgWind", "navigation.leeway",
 	]
 
 	/// Creates empty histories.
@@ -43,6 +51,8 @@ public struct MetricHistories: Sendable {
 		case "depth": depth.add(value, at: now)
 		case "temperature.water": waterTemp.add(value, at: now)
 		case "pressure.atmospheric": pressure.add(value, at: now)
+		case "navigation.vmgWind": vmgWind.add(value, at: now)
+		case "navigation.leeway": leeway.add(value, at: now)
 		default: break
 		}
 	}
@@ -59,6 +69,8 @@ public struct MetricHistories: Sendable {
 		case "depth": depth = TieredHistory(isAngle: false)
 		case "temperature.water": waterTemp = TieredHistory(isAngle: false)
 		case "pressure.atmospheric": pressure = PressureHistory()
+		case "navigation.vmgWind": vmgWind = TieredHistory(isAngle: false)
+		case "navigation.leeway": leeway = TieredHistory(isAngle: false)
 		default: break
 		}
 	}
@@ -76,6 +88,8 @@ public struct MetricHistories: Sendable {
 		case "depth": depth.recent.chronological
 		case "temperature.water": waterTemp.recent.chronological
 		case "pressure.atmospheric": pressure.samples.chronological
+		case "navigation.vmgWind": vmgWind.recent.chronological
+		case "navigation.leeway": leeway.recent.chronological
 		default: []
 		}
 	}

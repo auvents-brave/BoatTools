@@ -39,3 +39,18 @@ import Testing
 	histories.reset(name: "pressure.atmospheric")
 	#expect(histories.series(name: "pressure.atmospheric").isEmpty)
 }
+
+@Test func `The sailing VMG and the leeway keep their sign`() {
+	var histories = MetricHistories()
+	let start = Date(timeIntervalSince1970: 1_800_000_000)
+	for second in stride(from: 0, to: 20, by: 1) {
+		let t = start.addingTimeInterval(Double(second))
+		histories.add(name: "navigation.vmgWind", value: -3.2, at: t)
+		histories.add(name: "navigation.leeway", value: -6, at: t)
+	}
+
+	#expect(histories.series(name: "navigation.vmgWind").allSatisfy { $0.value < 0 })
+	// Arithmetic, not circular: a circular mean would report 354°.
+	#expect(histories.series(name: "navigation.leeway").allSatisfy { $0.value < 0 })
+	#expect(histories.series(name: "navigation.leeway").isEmpty == false)
+}

@@ -159,11 +159,11 @@ struct NMEASimulatorTests {
 		#expect(variation > 3.0 && variation < 4.2)
 	}
 
-	@Test("History backfill fills the wind and pressure curves")
+	@Test("History backfill fills the wind, performance and pressure curves")
 	func backfillFillsCurves() async throws {
 		let now = Date(timeIntervalSince1970: 1_700_000_000)
 		let backfill = NMEASimulator.historyBackfill(speedKnots: 6, endingAt: now)
-		for name in ["TWS", "TWD", "AWS", "AWA"] {
+		for name in ["TWS", "TWD", "AWS", "AWA", "navigation.vmgWind", "navigation.leeway"] {
 			let samples = try #require(backfill[name])
 			#expect(samples.count >= 700)  // ~1 h at 5 s spacing
 			#expect(samples.first!.at < samples.last!.at)  // oldest first
@@ -172,6 +172,13 @@ struct NMEASimulatorTests {
 		let pressure = try #require(backfill["pressure.atmospheric"])
 		#expect(pressure.count >= 90)  // ~48 h at 30 min spacing
 		#expect(pressure.allSatisfy { $0.value > 990 && $0.value < 1035 })
+
+		// The sailing VMG can never exceed the boat speed, and the leeway stays
+		// a few degrees to one side.
+		let vmg = try #require(backfill["navigation.vmgWind"])
+		#expect(vmg.allSatisfy { abs($0.value) <= 6.001 })
+		let leeway = try #require(backfill["navigation.leeway"])
+		#expect(leeway.allSatisfy { $0.value > -12 && $0.value < 0 })
 	}
 
 	@Test("Course wanders gently but stays bounded")

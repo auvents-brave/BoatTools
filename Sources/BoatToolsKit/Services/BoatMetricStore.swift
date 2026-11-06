@@ -693,6 +693,10 @@ public final class BoatMetricStore {
 	public var depthHist: TieredHistory { histories.depth }
 	/// Water temperature — 5 s / 1 min two-tier history.
 	public var waterTemp: TieredHistory { histories.waterTemp }
+	/// Speed made good along the wind axis — 5 s / 1 min two-tier history.
+	public var vmgWind: TieredHistory { histories.vmgWind }
+	/// Leeway angle — 5 s / 1 min two-tier history.
+	public var leeway: TieredHistory { histories.leeway }
 	/// Atmospheric pressure — 30 min samples over 48 hours.
 	public var pressure: PressureHistory { histories.pressure }
 
