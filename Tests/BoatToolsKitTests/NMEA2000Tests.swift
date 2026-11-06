@@ -36,18 +36,121 @@ struct NMEA2000Tests {
 		#expect(info.waypoints[4] == "CALVI")
 	}
 
-	/// PGN 129284 — the origin / destination waypoint numbers (bytes 17-24).
+	/// PGN 129284 — the origin / destination waypoint numbers (bytes 16-23).
 	@Test func `PGN 129284 — waypoint numbers decode and honour not-available`() {
-		var data = [UInt8](repeating: 0xFF, count: 35)
-		for (k, b) in Self.leBytes(UInt32(2)).enumerated() { data[17 + k] = b }
-		for (k, b) in Self.leBytes(UInt32(3)).enumerated() { data[21 + k] = b }
+		var data = [UInt8](repeating: 0xFF, count: 34)
+		for (k, b) in Self.leBytes(UInt32(2)).enumerated() { data[16 + k] = b }
+		for (k, b) in Self.leBytes(UInt32(3)).enumerated() { data[20 + k] = b }
 		let numbers = NMEA2000Decoder.navigationWaypointNumbers(data)
 		#expect(numbers.origin == 2)
 		#expect(numbers.destination == 3)
 
-		let unavailable = NMEA2000Decoder.navigationWaypointNumbers([UInt8](repeating: 0xFF, count: 35))
+		let unavailable = NMEA2000Decoder.navigationWaypointNumbers([UInt8](repeating: 0xFF, count: 34))
 		#expect(unavailable.origin == nil)
 		#expect(unavailable.destination == nil)
+	}
+
+	/// PGN 129284 laid out as the standard has it: the four flag fields share
+	/// byte 5. They used to be read as two, which pushed every later field a
+	/// byte along and put the closing velocity past the end of the 34-byte
+	/// message, so the VMG never decoded at all.
+	@Test func `PGN 129284 — bearings, destination and VMG sit where the standard puts them`()
+		throws
+	{
+		var d = [UInt8](repeating: 0xFF, count: 34)
+		d[0] = 0  // SID
+		func put(_ bytes: [UInt8], at: Int) { for (k, b) in bytes.enumerated() { d[at + k] = b } }
+		put(Self.leBytes(UInt32(185_200)), at: 1)  // 1852 m = 1 NM
+		d[5] = 0  // the single flags byte
+		put(Self.leBytes(UInt16((90.0 * .pi / 180 * 1e4).rounded())), at: 12)  // origin → dest
+		put(Self.leBytes(UInt16((45.0 * .pi / 180 * 1e4).rounded())), at: 14)  // position → dest
+		put(Self.leBytes(Int32(43_295_000)), at: 24)  // 4.3295° N
+		put(Self.leBytes(Int32(5_365_000)), at: 28)  // 0.5365° E
+		put(Self.leBytes(Int16(515)), at: 32)  // 5.15 m/s ≈ 10 kn
+
+		let m = try #require(NMEA2000Decoder.decode(pgn: 129284, data: d))
+		func value(_ name: String) throws -> Double {
+			try #require(m.first { $0.name == name }?.value)
+		}
+		#expect(abs(try value("navigation.distanceToWaypoint") - 1.0) < 1e-6)
+		#expect(abs(try value("navigation.bearingOriginToDest") - 90.0) < 0.01)
+		#expect(abs(try value("navigation.bearingToDest") - 45.0) < 0.01)
+		#expect(abs(try value("waypoint.lat") - 4.3295) < 1e-6)
+		#expect(abs(try value("waypoint.lon") - 0.5365) < 1e-6)
+		#expect(abs(try value("navigation.vmg") - 10.011) < 0.01)  // 515 × 0.01 m/s, quantised
+	}
+
+	/// PGN 129291 — the dedicated, fast-cadence current message.
+	@Test func `PGN 129291 — set and drift`() throws {
+		var d = [UInt8](repeating: 0xFF, count: 8)
+		d[0] = 0
+		d[1] = 0  // set reference: true
+		for (k, b) in Self.leBytes(UInt16((225.0 * .pi / 180 * 1e4).rounded())).enumerated() {
+			d[2 + k] = b
+		}
+		for (k, b) in Self.leBytes(UInt16(103)).enumerated() { d[4 + k] = b }  // 1.03 m/s ≈ 2 kn
+
+		let m = try #require(NMEA2000Decoder.decode(pgn: 129291, data: d))
+		let set = try #require(m.first { $0.name == "navigation.currentSet" })
+		let drift = try #require(m.first { $0.name == "navigation.currentDrift" })
+		#expect(abs(set.value - 225.0) < 0.01)
+		#expect(set.unit == "°")
+		#expect(abs(drift.value - 2.0) < 0.01)
+		#expect(drift.unit == "kn")
+	}
+
+	/// PGN 129291 with a magnetic reference keeps the value out of the true slot.
+	@Test func `PGN 129291 — a magnetic set is named as such`() throws {
+		var d = [UInt8](repeating: 0xFF, count: 8)
+		d[0] = 0
+		d[1] = 1  // set reference: magnetic
+		for (k, b) in Self.leBytes(UInt16((90.0 * .pi / 180 * 1e4).rounded())).enumerated() {
+			d[2 + k] = b
+		}
+		let m = try #require(NMEA2000Decoder.decode(pgn: 129291, data: d))
+		#expect(m.contains { $0.name == "navigation.currentSet.magnetic" })
+		#expect(!m.contains { $0.name == "navigation.currentSet" })
+	}
+
+	/// PGN 130577 — both velocity vectors and the current between them.
+	@Test func `PGN 130577 — direction data carries six quantities`() throws {
+		var d = [UInt8](repeating: 0xFF, count: 14)
+		d[0] = 0  // data mode + COG reference (true)
+		d[1] = 0  // SID
+		func put(_ bytes: [UInt8], at: Int) { for (k, b) in bytes.enumerated() { d[at + k] = b } }
+		func radians(_ degrees: Double) -> [UInt8] {
+			Self.leBytes(UInt16((degrees * .pi / 180 * 1e4).rounded()))
+		}
+		put(radians(100), at: 2)  // COG
+		put(Self.leBytes(UInt16(309)), at: 4)  // SOG 3.09 m/s ≈ 6 kn
+		put(radians(95), at: 6)  // heading
+		put(Self.leBytes(UInt16(257)), at: 8)  // STW 2.57 m/s ≈ 5 kn
+		put(radians(270), at: 10)  // set
+		put(Self.leBytes(UInt16(51)), at: 12)  // drift 0.51 m/s ≈ 1 kn
+
+		let m = try #require(NMEA2000Decoder.decode(pgn: 130577, data: d))
+		func value(_ name: String) throws -> Double {
+			try #require(m.first { $0.name == name }?.value)
+		}
+		#expect(abs(try value("COG") - 100) < 0.01)
+		#expect(abs(try value("SOG") - 6.0) < 0.02)
+		#expect(abs(try value("HDG.true") - 95) < 0.01)
+		#expect(abs(try value("STW") - 5.0) < 0.02)
+		#expect(abs(try value("navigation.currentSet") - 270) < 0.01)
+		#expect(abs(try value("navigation.currentDrift") - 1.0) < 0.02)
+	}
+
+	/// PGN 128000 — leeway, signed to starboard.
+	@Test func `PGN 128000 — leeway angle is signed`() throws {
+		var d = [UInt8](repeating: 0xFF, count: 8)
+		d[0] = 0
+		for (k, b) in Self.leBytes(Int16((-5.0 * .pi / 180 * 1e4).rounded())).enumerated() {
+			d[1 + k] = b
+		}
+		let m = try #require(NMEA2000Decoder.decode(pgn: 128000, data: d))
+		let leeway = try #require(m.first { $0.name == "navigation.leeway" })
+		#expect(abs(leeway.value - -5.0) < 0.01)
+		#expect(leeway.unit == "°")
 	}
 
 	/// Switching source must not leave the previous feed's route lingering: the
@@ -67,9 +170,9 @@ struct NMEA2000Tests {
 		route.append(0xFF)  // reserved
 		route += Self.leBytes(UInt16(2)) + varString("WP 2") + [UInt8](repeating: 0, count: 8)
 		// PGN 129284 — destination waypoint number 2.
-		var nav = [UInt8](repeating: 0xFF, count: 35)
-		for (k, b) in Self.leBytes(UInt32(1)).enumerated() { nav[17 + k] = b }
-		for (k, b) in Self.leBytes(UInt32(2)).enumerated() { nav[21 + k] = b }
+		var nav = [UInt8](repeating: 0xFF, count: 34)
+		for (k, b) in Self.leBytes(UInt32(1)).enumerated() { nav[16 + k] = b }
+		for (k, b) in Self.leBytes(UInt32(2)).enumerated() { nav[20 + k] = b }
 
 		let store = BoatMetricStore()
 		store.feed(.nmea2000(pgn: 129_285, source: 0, priority: 6, data: route))
@@ -160,5 +263,90 @@ struct NMEA2000Tests {
 
 	@Test func `Unknown PGN returns nil`() {
 		#expect(NMEA2000Decoder.decode(pgn: 999_999, data: [UInt8](repeating: 0, count: 8)) == nil)
+	}
+
+	/// The current reaches the store from three places, and the store has to
+	/// pick the same way it does for every other quantity: the message that
+	/// exists for nothing else wins, whichever arrives last.
+	@MainActor @Test func `Set and drift are arbitrated, dedicated source first`() throws {
+		func rapid(set: Double, drift: Double) -> [UInt8] {
+			var d = [UInt8](repeating: 0xFF, count: 8)
+			d[0] = 0
+			d[1] = 0
+			for (k, b) in Self.leBytes(UInt16((set * .pi / 180 * 1e4).rounded())).enumerated() {
+				d[2 + k] = b
+			}
+			for (k, b) in Self.leBytes(UInt16((drift / 1.94384 / 0.01).rounded())).enumerated() {
+				d[4 + k] = b
+			}
+			return d
+		}
+		func direction(set: Double, drift: Double) -> [UInt8] {
+			var d = [UInt8](repeating: 0xFF, count: 14)
+			d[0] = 0
+			d[1] = 0
+			for (k, b) in Self.leBytes(UInt16((set * .pi / 180 * 1e4).rounded())).enumerated() {
+				d[10 + k] = b
+			}
+			for (k, b) in Self.leBytes(UInt16((drift / 1.94384 / 0.01).rounded())).enumerated() {
+				d[12 + k] = b
+			}
+			return d
+		}
+
+		// `feed` tags the source; the metrics follow it as `.metric` frames,
+		// exactly as the transport does.
+		func send(_ store: BoatMetricStore, pgn: UInt32, _ data: [UInt8]) {
+			store.feed(.nmea2000(pgn: pgn, source: 0, priority: 6, data: data))
+			for m in NMEA2000Decoder.decode(pgn: pgn, data: data) ?? [] { store.feed(.metric(m)) }
+		}
+		func sendVDR(_ store: BoatMetricStore) {
+			let frame = NMEA0183Parser.parse("$IIVDR,100.0,T,,,9.9,N")
+			guard case .nmea0183(_, _, _, let fields)? = frame else { return }
+			store.feed(frame!)
+			for m in NMEA0183Parser.decode(fields) ?? [] { store.feed(.metric(m)) }
+		}
+
+		// The weaker sources first, then the dedicated one.
+		let store = BoatMetricStore()
+		sendVDR(store)
+		send(store, pgn: 130_577, direction(set: 200, drift: 5))
+		send(store, pgn: 129_291, rapid(set: 270, drift: 2))
+		store.flushNow()
+		#expect(abs(try #require(store.metrics["navigation.currentSet"]?.value) - 270) < 0.02)
+		#expect(abs(try #require(store.metrics["navigation.currentDrift"]?.value) - 2) < 0.02)
+
+		// And the other way round: a weaker source arriving later must not win.
+		let reversed = BoatMetricStore()
+		send(reversed, pgn: 129_291, rapid(set: 270, drift: 2))
+		send(reversed, pgn: 130_577, direction(set: 200, drift: 5))
+		sendVDR(reversed)
+		reversed.flushNow()
+		#expect(abs(try #require(reversed.metrics["navigation.currentSet"]?.value) - 270) < 0.02)
+	}
+
+	/// Direction Data repeats COG, SOG, heading and speed through water, so it
+	/// must lose those to the messages dedicated to each.
+	@MainActor @Test func `Direction Data does not displace the dedicated speed and heading sources`()
+		throws
+	{
+		var direction = [UInt8](repeating: 0xFF, count: 14)
+		direction[0] = 0
+		direction[1] = 0
+		for (k, b) in Self.leBytes(UInt16(1_000)).enumerated() { direction[8 + k] = b }  // STW 10 m/s
+
+		var speed = [UInt8](repeating: 0xFF, count: 8)
+		speed[0] = 0
+		for (k, b) in Self.leBytes(UInt16(257)).enumerated() { speed[1 + k] = b }  // STW 2.57 m/s ≈ 5 kn
+
+		func send(_ store: BoatMetricStore, pgn: UInt32, _ data: [UInt8]) {
+			store.feed(.nmea2000(pgn: pgn, source: 0, priority: 6, data: data))
+			for m in NMEA2000Decoder.decode(pgn: pgn, data: data) ?? [] { store.feed(.metric(m)) }
+		}
+		let store = BoatMetricStore()
+		send(store, pgn: 128_259, speed)
+		send(store, pgn: 130_577, direction)
+		store.flushNow()
+		#expect(abs(try #require(store.metrics["STW"]?.value) - 5.0) < 0.02)
 	}
 }

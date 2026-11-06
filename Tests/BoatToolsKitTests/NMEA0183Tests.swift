@@ -87,6 +87,68 @@ struct NMEA0183Tests {
 		#expect(abs(p - 1013.2) < 1e-6)
 	}
 
+	/// VDR — the only 0183 sentence that states a current at all.
+	@Test func `VDR decodes set and drift, keeping the magnetic set apart`() throws {
+		guard case .nmea0183(_, _, _, let fields)? = NMEA0183Parser.parse("$IIVDR,225.0,T,228.0,M,2.1,N")
+		else {
+			Issue.record("parse failed")
+			return
+		}
+		let byName = Dictionary(
+			uniqueKeysWithValues: try #require(NMEA0183Parser.decode(fields)).map { ($0.name, $0.value) })
+		#expect(byName["navigation.currentSet"] == 225.0)
+		#expect(byName["navigation.currentSet.magnetic"] == 228.0)
+		#expect(byName["navigation.currentDrift"] == 2.1)
+	}
+
+	/// A current stated only in magnetic degrees must not land in the true slot.
+	@Test func `VDR with no true field leaves the true set empty`() throws {
+		guard case .nmea0183(_, _, _, let fields)? = NMEA0183Parser.parse("$IIVDR,,,228.0,M,2.1,N")
+		else {
+			Issue.record("parse failed")
+			return
+		}
+		let names = Set(try #require(NMEA0183Parser.decode(fields)).map(\.name))
+		#expect(names.contains("navigation.currentSet.magnetic"))
+		#expect(!names.contains("navigation.currentSet"))
+	}
+
+	/// VPW — speed along the wind axis, the sailing VMG. Negative to leeward,
+	/// and a different quantity from the VMG towards a waypoint.
+	@Test func `VPW decodes the sailing VMG and keeps its sign`() throws {
+		guard case .nmea0183(_, _, _, let fields)? = NMEA0183Parser.parse("$IIVPW,-3.2,N,-1.65,M")
+		else {
+			Issue.record("parse failed")
+			return
+		}
+		let metrics = try #require(NMEA0183Parser.decode(fields))
+		let vmg = try #require(metrics.first { $0.name == "navigation.vmgWind" })
+		#expect(vmg.value == -3.2)
+		#expect(vmg.unit == "kn")
+		#expect(!metrics.contains { $0.name == "navigation.vmg" })
+	}
+
+	/// VPW in metres per second alone still reaches the store in knots.
+	@Test func `VPW falls back to the metric field`() throws {
+		guard case .nmea0183(_, _, _, let fields)? = NMEA0183Parser.parse("$IIVPW,,,2.0,M") else {
+			Issue.record("parse failed")
+			return
+		}
+		let v = try #require(NMEA0183Parser.decode(fields)?.first { $0.name == "navigation.vmgWind" }?.value)
+		#expect(abs(v - 3.88768) < 1e-5)
+	}
+
+	/// WCV — waypoint closure velocity: the same quantity RMB buries in field 12.
+	@Test func `WCV decodes the VMG towards the waypoint`() throws {
+		guard case .nmea0183(_, _, _, let fields)? = NMEA0183Parser.parse("$IIWCV,6.4,N,CALVI,A")
+		else {
+			Issue.record("parse failed")
+			return
+		}
+		let v = try #require(NMEA0183Parser.decode(fields)?.first { $0.name == "navigation.vmg" }?.value)
+		#expect(v == 6.4)
+	}
+
 	@Test func `VWT decodes true wind angle and speed`() throws {
 		guard case .nmea0183(_, _, _, let fields)? = NMEA0183Parser.parse("$WIVWT,45,L,10.5,N,5.4,M,19.4,K")
 		else {

@@ -98,6 +98,9 @@ public enum NMEA0183Parser {
 		case "DPT": return decodeDPT(fields)
 		case "DBT": return decodeDBT(fields)
 		case "VBW": return decodeVBW(fields)
+		case "VDR": return decodeVDR(fields)
+		case "VPW": return decodeVPW(fields)
+		case "WCV": return decodeWCV(fields)
 		case "VHW": return decodeVHW(fields)
 		case "HDT", "HDG", "HDM": return decodeHeading(fields, type: type)
 		case "MWD": return decodeMWD(fields)
@@ -209,6 +212,49 @@ public enum NMEA0183Parser {
 
 	// VHW — Water speed and heading.
 	//   $--VHW,<headTrue>,T,<headMag>,M,<speedKn>,N,<speedKmh>,K*cs
+	// VDR — Set and Drift.
+	//   $--VDR,<dirTrue>,T,<dirMagnetic>,M,<speed>,N*cs
+	// Set is the direction the current flows *towards*, drift its speed. The
+	// true field is preferred; the magnetic one is kept under its own name so
+	// the store can fall back to it exactly as it does for heading.
+	private static func decodeVDR(_ f: [String]) -> [BoatMetric]? {
+		var out: [BoatMetric] = []
+		if f.count >= 3, f[2].hasPrefix("T"), let t = Double(f[1]) {
+			out.append(.init(name: "navigation.currentSet", value: t, unit: "°"))
+		}
+		if f.count >= 5, f[4].hasPrefix("M"), let m = Double(f[3]) {
+			out.append(.init(name: "navigation.currentSet.magnetic", value: m, unit: "°"))
+		}
+		if f.count >= 7, f[6].hasPrefix("N"), let d = Double(f[5]) {
+			out.append(.init(name: "navigation.currentDrift", value: d, unit: "kn"))
+		}
+		return out.isEmpty ? nil : out
+	}
+
+	// VPW — Speed measured parallel to wind.
+	//   $--VPW,<knots>,N,<metresPerSecond>,M*cs
+	// The sailing VMG: the component of the boat's speed along the wind axis,
+	// negative when making good to leeward. A different quantity from the VMG
+	// towards a waypoint, so it keeps its own name.
+	private static func decodeVPW(_ f: [String]) -> [BoatMetric]? {
+		if f.count >= 3, f[2].hasPrefix("N"), let knots = Double(f[1]) {
+			return [.init(name: "navigation.vmgWind", value: knots, unit: "kn")]
+		}
+		if f.count >= 5, f[4].hasPrefix("M"), let mps = Double(f[3]) {
+			return [.init(name: "navigation.vmgWind", value: mps * 1.94384, unit: "kn")]
+		}
+		return nil
+	}
+
+	// WCV — Waypoint Closure Velocity.
+	//   $--WCV,<velocity>,N,<waypointId>,<mode>*cs
+	// The same quantity RMB carries in its field 12, from a sentence that
+	// exists for nothing else.
+	private static func decodeWCV(_ f: [String]) -> [BoatMetric]? {
+		guard f.count >= 3, f[2].hasPrefix("N"), let v = Double(f[1]) else { return nil }
+		return [.init(name: "navigation.vmg", value: v, unit: "kn")]
+	}
+
 	private static func decodeVHW(_ f: [String]) -> [BoatMetric]? {
 		var out: [BoatMetric] = []
 		if f.count >= 2, let ht = Double(f[1]) { out.append(.init(name: "HDG.true", value: ht, unit: "°")) }
@@ -1150,7 +1196,10 @@ internal enum NMEA2000Decoder {
 		case 128776: return windlassControl(data)
 		case 128777: return windlassOperating(data)
 		case 128778: return windlassMonitoring(data)
+		case 128000: return leewayAngle(data)
 		case 128259: return stw(data)
+		case 129291: return setAndDrift(data)
+		case 130577: return directionData(data)
 		case 128267: return depth(data)
 		case 128275: return distanceLog(data)
 		case 129025: return positionRapid(data)
@@ -1521,6 +1570,71 @@ internal enum NMEA2000Decoder {
 	//   bytes 3-4: Speed Ground Referenced (uint16, 0.01 m/s per LSB)
 	//   byte 5: Speed Water Reference Type (4 bits) + reserved
 	//   bytes 6-7: reserved
+	// 128000 — Leeway Angle (single frame, 8 bytes)
+	//   byte 0: SID, bytes 1-2: leeway angle (int16, 1e-4 rad, signed)
+	// Positive to starboard: the angle between where the bow points and where
+	// the hull actually goes through the water.
+	private static func leewayAngle(_ d: [UInt8]) -> [BoatMetric]? {
+		guard let a = i16(d, 1), !na(a) else { return nil }
+		return [.init(name: "navigation.leeway", value: Double(a) * 1e-4 * 180 / .pi, unit: "°")]
+	}
+
+	// 129291 — Set & Drift, Rapid Update (single frame, 8 bytes)
+	//   byte 0: SID, byte 1: set reference (2 bits), bytes 2-3: set (uint16,
+	//   1e-4 rad), bytes 4-5: drift (uint16, 0.01 m/s)
+	// The dedicated, fast-cadence current message — preferred over 130577,
+	// which carries the same pair among five other fields.
+	private static func setAndDrift(_ d: [UInt8]) -> [BoatMetric]? {
+		var out: [BoatMetric] = []
+		let reference = (u8(d, 1) ?? 0xFF) & 0x03
+		if let set = u16(d, 2), !na(set) {
+			let name = reference == 1 ? "navigation.currentSet.magnetic" : "navigation.currentSet"
+			out.append(.init(name: name, value: Double(set) * 1e-4 * 180 / .pi, unit: "°"))
+		}
+		if let drift = u16(d, 4), !na(drift) {
+			out.append(
+				.init(name: "navigation.currentDrift", value: Double(drift) * 0.01 * 1.94384, unit: "kn"))
+		}
+		return out.isEmpty ? nil : out
+	}
+
+	// 130577 — Direction Data (fast packet, 14 bytes)
+	//   byte 0: data mode (4 bits) + COG reference (2 bits) + reserved
+	//   byte 1: SID, bytes 2-3: COG (uint16, 1e-4 rad)
+	//   bytes 4-5: SOG (uint16, 0.01 m/s), bytes 6-7: heading (uint16, 1e-4 rad)
+	//   bytes 8-9: speed through water (uint16, 0.01 m/s)
+	//   bytes 10-11: set (uint16, 1e-4 rad), bytes 12-13: drift (uint16, 0.01 m/s)
+	// One message carrying both velocity vectors and the current between them.
+	// Every field also arrives from a more specific PGN, so the metric store
+	// ranks this below each of them.
+	private static func directionData(_ d: [UInt8]) -> [BoatMetric]? {
+		var out: [BoatMetric] = []
+		let cogReference = ((u8(d, 0) ?? 0xFF) >> 4) & 0x03
+		if let cog = u16(d, 2), !na(cog) {
+			let name = cogReference == 1 ? "COG.magnetic" : "COG"
+			out.append(.init(name: name, value: Double(cog) * 1e-4 * 180 / .pi, unit: "°"))
+		}
+		if let sog = u16(d, 4), !na(sog) {
+			out.append(.init(name: "SOG", value: Double(sog) * 0.01 * 1.94384, unit: "kn"))
+		}
+		if let heading = u16(d, 6), !na(heading) {
+			out.append(
+				.init(name: "HDG.true", value: Double(heading) * 1e-4 * 180 / .pi, unit: "°"))
+		}
+		if let stw = u16(d, 8), !na(stw) {
+			out.append(.init(name: "STW", value: Double(stw) * 0.01 * 1.94384, unit: "kn"))
+		}
+		if let set = u16(d, 10), !na(set) {
+			out.append(
+				.init(name: "navigation.currentSet", value: Double(set) * 1e-4 * 180 / .pi, unit: "°"))
+		}
+		if let drift = u16(d, 12), !na(drift) {
+			out.append(
+				.init(name: "navigation.currentDrift", value: Double(drift) * 0.01 * 1.94384, unit: "kn"))
+		}
+		return out.isEmpty ? nil : out
+	}
+
 	private static func stw(_ d: [UInt8]) -> [BoatMetric]? {
 		var out: [BoatMetric] = []
 		if let w = u16(d, 1), !na(w) {
@@ -2204,15 +2318,21 @@ internal enum NMEA2000Decoder {
 	// 129284 — Navigation Data (fast packet)
 	//   byte 0: SID
 	//   bytes 1-4: distance to destination waypoint (uint32, 0.01 m per LSB)
-	//   byte 5: course/bearing reference (4 bits) + perpendicular crossed (2 bits) + arrival circle entered (2 bits)
-	//   byte 6: calculation type (2 bits) + reserved
-	//   bytes 7-10: ETA time, bytes 11-12: ETA date — skipped
-	//   bytes 13-14: bearing origin → destination waypoint (uint16, 1e-4 rad)
-	//   bytes 15-16: bearing position → destination waypoint (uint16, 1e-4 rad)
-	//   bytes 17-20: origin waypoint number, bytes 21-24: destination waypoint number — skipped (IDs are numeric refs)
-	//   bytes 25-28: destination waypoint latitude (int32, 1e-7 deg)
-	//   bytes 29-32: destination waypoint longitude (int32, 1e-7 deg)
-	//   bytes 33-34: waypoint closing velocity (int16, 0.01 m/s — signed, positive = approaching)
+	//   byte 5: course/bearing reference (2 bits) + perpendicular crossed (2 bits)
+	//           + arrival circle entered (2 bits) + calculation type (2 bits)
+	//   bytes 6-9: ETA time, bytes 10-11: ETA date
+	//   bytes 12-13: bearing origin → destination waypoint (uint16, 1e-4 rad)
+	//   bytes 14-15: bearing position → destination waypoint (uint16, 1e-4 rad)
+	//   bytes 16-19: origin waypoint number, bytes 20-23: destination waypoint number
+	//   bytes 24-27: destination waypoint latitude (int32, 1e-7 deg)
+	//   bytes 28-31: destination waypoint longitude (int32, 1e-7 deg)
+	//   bytes 32-33: waypoint closing velocity (int16, 0.01 m/s — signed, positive = approaching)
+	//
+	// The four flag fields share ONE byte, not two. Reading them as two pushed
+	// every field after the distance a byte too far, which also put the closing
+	// velocity past the 34-byte end of the PGN so it never decoded at all. The
+	// simulator wrote the same wrong layout, so the pair agreed with each other
+	// and only real hardware would have disagreed.
 	private static func navigationData(_ d: [UInt8]) -> [BoatMetric]? {
 		var out: [BoatMetric] = []
 		if let dist = u32(d, 1), !na(dist) {
@@ -2223,29 +2343,31 @@ internal enum NMEA2000Decoder {
 		}
 		// ETA at the destination waypoint: time (0.0001 s of day) + date (days
 		// since 1970), combined into a UNIX timestamp.
-		if let etaTime = u32(d, 7), !na(etaTime), let etaDate = u16(d, 11), !na(etaDate) {
+		if let etaTime = u32(d, 6), !na(etaTime), let etaDate = u16(d, 10), !na(etaDate) {
 			let epoch = Double(etaDate) * 86_400.0 + Double(etaTime) * 0.0001
 			out.append(.init(name: "navigation.eta", value: epoch, unit: "s"))
 		}
-		if let b = u16(d, 13), !na(b) {
+		if let b = u16(d, 12), !na(b) {
 			out.append(
 				.init(
 					name: "navigation.bearingOriginToDest",
 					value: Double(b) * 1e-4 * 180 / .pi, unit: "°"))
 		}
-		if let b = u16(d, 15), !na(b) {
+		if let b = u16(d, 14), !na(b) {
 			out.append(
 				.init(
 					name: "navigation.bearingToDest",
 					value: Double(b) * 1e-4 * 180 / .pi, unit: "°"))
 		}
-		if let lat = i32(d, 25), !na(lat) {
+		if let lat = i32(d, 24), !na(lat) {
 			out.append(.init(name: "waypoint.lat", value: Double(lat) * 1e-7, unit: "°"))
 		}
-		if let lon = i32(d, 29), !na(lon) {
+		if let lon = i32(d, 28), !na(lon) {
 			out.append(.init(name: "waypoint.lon", value: Double(lon) * 1e-7, unit: "°"))
 		}
-		if let vmg = i16(d, 33), !na(vmg) {
+		// Waypoint Closing Velocity — the speed at which the destination is
+		// approached, which plotters label VMG. Signed: negative when opening.
+		if let vmg = i16(d, 32), !na(vmg) {
 			out.append(
 				.init(
 					name: "navigation.vmg",
@@ -2278,11 +2400,11 @@ internal enum NMEA2000Decoder {
 		return (route, names)
 	}
 
-	/// The origin and destination waypoint numbers of PGN 129284 (bytes 17-24)
+	/// The origin and destination waypoint numbers of PGN 129284 (bytes 16-23)
 	/// — indices into the route broadcast by 129285.
 	static func navigationWaypointNumbers(_ d: [UInt8]) -> (origin: Int?, destination: Int?) {
-		let origin = u32(d, 17).flatMap { na($0) ? nil : Int($0) }
-		let destination = u32(d, 21).flatMap { na($0) ? nil : Int($0) }
+		let origin = u32(d, 16).flatMap { na($0) ? nil : Int($0) }
+		let destination = u32(d, 20).flatMap { na($0) ? nil : Int($0) }
 		return (origin, destination)
 	}
 

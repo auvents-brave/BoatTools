@@ -346,6 +346,17 @@ private enum PriorityResolver {
 			"waypoint.lat", "waypoint.lon":
 			return navRank(source)
 
+		// --- 9b. Current, leeway and the sailing VMG ---
+		case "navigation.currentSet", "navigation.currentSet.magnetic",
+			"navigation.currentDrift":
+			return currentRank(source)
+
+		case "navigation.leeway":
+			return leewayRank(source)
+
+		case "navigation.vmgWind":
+			return vmgWindRank(source)
+
 		// --- 10. Atmosphere ---
 		case "pressure.atmospheric":
 			return atmosphereRank(
@@ -398,6 +409,7 @@ private enum PriorityResolver {
 		case .nmea0183(_, type: "VTG"): return 20
 		case .nmea0183(_, type: "RMC"): return 30
 		case .nmea0183(_, type: "VBW"): return 40  // longitudinal ground speed only (SOG; no COG)
+		case .nmea2000(pgn: 130577): return 45  // Direction Data — a by-product of the current pair
 		case .signalK: return 50
 		default: return 100
 		}
@@ -408,6 +420,7 @@ private enum PriorityResolver {
 		case .nmea2000(pgn: 128259): return 10  // Speed
 		case .nmea0183(_, type: "VHW"): return 20  // dedicated water-speed sentence
 		case .nmea0183(_, type: "VBW"): return 30  // longitudinal water speed
+		case .nmea2000(pgn: 130577): return 35  // Direction Data — a by-product of the current pair
 		case .signalK: return 40
 		default: return 100
 		}
@@ -419,6 +432,7 @@ private enum PriorityResolver {
 		case .nmea0183(_, type: "HDT"): return 20
 		case .nmea0183(_, type: "HDG"): return 30
 		case .nmea0183(_, type: "HDM"): return 40
+		case .nmea2000(pgn: 130577): return 45  // Direction Data — a by-product of the current pair
 		case .signalK: return 50
 		default: return 100
 		}
@@ -480,6 +494,7 @@ private enum PriorityResolver {
 		switch s {
 		case .nmea2000(pgn: 129284): return 10  // Navigation Data
 		case .nmea0183(_, type: "APB"): return 20
+		case .nmea0183(_, type: "WCV"): return 25  // closure velocity and nothing else
 		case .nmea0183(_, type: "RMB"): return 30
 		case .nmea0183(_, type: "BWC"),
 			.nmea0183(_, type: "BWR"):
@@ -490,6 +505,38 @@ private enum PriorityResolver {
 	}
 
 	/// Atmosphere rank — caller specifies which PGNs and NMEA sentence types are rank-1 and rank-2.
+	/// Set and drift. The rapid-update PGN exists for nothing else, so it leads;
+	/// Direction Data carries the same pair among five other fields, and VDR is
+	/// the only 0183 sentence that states a current at all.
+	private static func currentRank(_ s: SourceKind) -> Int {
+		switch s {
+		case .nmea2000(pgn: 129291): return 10  // Set & Drift, Rapid Update
+		case .nmea2000(pgn: 130577): return 20  // Direction Data
+		case .nmea0183(_, type: "VDR"): return 30
+		case .signalK: return 40
+		default: return 100
+		}
+	}
+
+	/// Leeway. One PGN states it; no 0183 sentence does.
+	private static func leewayRank(_ s: SourceKind) -> Int {
+		switch s {
+		case .nmea2000(pgn: 128000): return 10  // Leeway Angle
+		case .signalK: return 20
+		default: return 100
+		}
+	}
+
+	/// Speed made good along the wind axis — the sailing VMG, which only VPW
+	/// carries on the wire.
+	private static func vmgWindRank(_ s: SourceKind) -> Int {
+		switch s {
+		case .nmea0183(_, type: "VPW"): return 10
+		case .signalK: return 20
+		default: return 100
+		}
+	}
+
 	private static func atmosphereRank(pgns: [UInt32], nmea0183Types: [String], source: SourceKind) -> Int {
 		switch source {
 		case .nmea2000(let pgn) where pgns.contains(pgn): return 10
@@ -876,6 +923,15 @@ public final class BoatMetricStore {
 		let now = Date()
 		flush(at: now)
 		pruneAISTargets(now: now)
+	}
+
+	/// Publishes what has been collected without waiting for the timer.
+	///
+	/// Source arbitration happens at a flush, not as frames arrive, so a test
+	/// that feeds competing sources has to ask for one. Internal: a seam for
+	/// the tests, not part of the public surface.
+	func flushNow(at now: Date = Date()) {
+		flush(at: now)
 	}
 
 	/// Whether `metrics["HDG.true"]` currently holds a COG-derived fallback

@@ -905,33 +905,36 @@ public enum NMEASimulator {
 		}
 	}
 
-	/// PGN 129284 — Navigation Data (35-byte fast packet): distance, ETA,
+	/// PGN 129284 — Navigation Data (34-byte fast packet): distance, ETA,
 	/// bearings, destination waypoint position and VMG.
+	///
+	/// The four flag fields share byte 5. Writing them as two bytes shifted
+	/// everything after the distance, which is what the decoder used to expect
+	/// — the two agreed with each other and both disagreed with the standard.
 	private static func navigationDataPayload(
 		target: GeoPoint, distanceMetres: Double, bearing: Double, speedKnots: Double,
 		destinationNumber: Int
 	) -> [UInt8] {
-		var d = [UInt8](repeating: 0xFF, count: 35)
+		var d = [UInt8](repeating: 0xFF, count: 34)
 		d[0] = 0x00
 		func put(_ bytes: [UInt8], at: Int) { for (k, b) in bytes.enumerated() { d[at + k] = b } }
 		put(littleEndian(UInt32((distanceMetres / 0.01).rounded())), at: 1)
 		d[5] = 0
-		d[6] = 0
 		// ETA at present speed.
 		let speedMps = max(0.1, speedKnots * knotsToMetresPerSecond)
 		let eta = Date().timeIntervalSince1970 + distanceMetres / speedMps
 		let days = UInt16(eta / 86_400)
-		put(littleEndian(UInt32(((eta - Double(days) * 86_400) * 10_000).rounded())), at: 7)
-		put(littleEndian(days), at: 11)
+		put(littleEndian(UInt32(((eta - Double(days) * 86_400) * 10_000).rounded())), at: 6)
+		put(littleEndian(days), at: 10)
 		let brg = littleEndian(UInt16((normalise(bearing) * .pi / 180 * 1e4).rounded()))
-		put(brg, at: 13)
-		put(brg, at: 15)
+		put(brg, at: 12)
+		put(brg, at: 14)
 		// Origin and destination waypoint numbers — indices into the 129285 plan.
-		put(littleEndian(UInt32(max(0, destinationNumber - 1))), at: 17)
-		put(littleEndian(UInt32(destinationNumber)), at: 21)
-		put(littleEndian(Int32((target.latitude * 1e7).rounded())), at: 25)
-		put(littleEndian(Int32((target.longitude * 1e7).rounded())), at: 29)
-		put(littleEndian(UInt16(bitPattern: Int16((speedKnots / 1.94384 / 0.01).rounded()))), at: 33)
+		put(littleEndian(UInt32(max(0, destinationNumber - 1))), at: 16)
+		put(littleEndian(UInt32(destinationNumber)), at: 20)
+		put(littleEndian(Int32((target.latitude * 1e7).rounded())), at: 24)
+		put(littleEndian(Int32((target.longitude * 1e7).rounded())), at: 28)
+		put(littleEndian(UInt16(bitPattern: Int16((speedKnots / 1.94384 / 0.01).rounded()))), at: 32)
 		return d
 	}
 

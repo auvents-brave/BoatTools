@@ -522,6 +522,20 @@ public final class SignalKClient: Sendable {
 			"navigation.courseGreatCircle.nextPoint.velocityMadeGood":
 			return ("navigation.vmg", value * msToKnots, "kn")
 
+		// Current, leeway and the sailing VMG. Signal K keeps the speed made
+		// good along the wind axis under `performance`, apart from the velocity
+		// made good towards a waypoint above — two different quantities.
+		case "environment.current.setTrue":
+			return ("navigation.currentSet", value * radToDeg, "°")
+		case "environment.current.setMagnetic":
+			return ("navigation.currentSet.magnetic", value * radToDeg, "°")
+		case "environment.current.drift":
+			return ("navigation.currentDrift", value * msToKnots, "kn")
+		case "navigation.leewayAngle":
+			return ("navigation.leeway", value * radToDeg, "°")
+		case "performance.velocityMadeGood":
+			return ("navigation.vmgWind", value * msToKnots, "kn")
+
 		// Time
 		case "navigation.datetime": return ("utc.timestamp", value, "s")
 
