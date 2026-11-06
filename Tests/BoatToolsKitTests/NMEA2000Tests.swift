@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import BoatToolsKit
@@ -348,5 +349,25 @@ struct NMEA2000Tests {
 		send(store, pgn: 130_577, direction)
 		store.flushNow()
 		#expect(abs(try #require(store.metrics["STW"]?.value) - 5.0) < 0.02)
+	}
+
+	/// A plotter stops broadcasting its route data the moment the navigator
+	/// deactivates the destination, so the store has to let those values go — or
+	/// a closing velocity on a waypoint nobody is steering for sits on the
+	/// display for the rest of the passage.
+	@MainActor @Test func `route read-outs expire, other read-outs hold`() {
+		let store = BoatMetricStore()
+		let stale = Date().addingTimeInterval(-20)
+		store.feed(.metric(BoatMetric(name: "navigation.vmg", value: 5.2, unit: "kn", timestamp: stale)))
+		store.feed(.metric(BoatMetric(name: "depth.belowTransducer", value: 18, unit: "m", timestamp: stale)))
+		store.flushNow()
+		#expect(store.metrics["navigation.vmg"] == nil)
+		// Silence is not a new sounding: the last depth stands.
+		#expect(store.metrics["depth.belowTransducer"] != nil)
+
+		// And a value still being sent is untouched.
+		store.feed(.metric(BoatMetric(name: "navigation.vmg", value: 5.2, unit: "kn")))
+		store.flushNow()
+		#expect(store.metrics["navigation.vmg"]?.value == 5.2)
 	}
 }

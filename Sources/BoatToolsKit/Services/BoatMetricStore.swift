@@ -537,6 +537,21 @@ private enum PriorityResolver {
 		}
 	}
 
+	/// How long a value stays published after the last report of it, or `nil`
+	/// when it holds until the source is dropped.
+	///
+	/// Most metrics hold indefinitely: an echo sounder that goes quiet has not
+	/// said the water got deeper, and the last sounding beats nothing. The
+	/// `navigation.` family is the exception — a plotter simply stops
+	/// broadcasting it when the navigator deactivates the destination, so a
+	/// closing velocity on a waypoint nobody is steering for would sit on the
+	/// display for the rest of the passage. Every member of the family is
+	/// repeated at least every few seconds while it is live, so the horizon is
+	/// generous.
+	static func lifetime(for name: String) -> TimeInterval? {
+		name.hasPrefix("navigation.") ? 15 : nil
+	}
+
 	private static func atmosphereRank(pgns: [UInt32], nmea0183Types: [String], source: SourceKind) -> Int {
 		switch source {
 		case .nmea2000(let pgn) where pgns.contains(pgn): return 10
@@ -959,6 +974,13 @@ public final class BoatMetricStore {
 		for m in newMetrics {
 			metrics[m.name] = m
 			feedHistory(name: m.name, value: m.value, at: now)
+		}
+
+		// Retire the values whose source has stopped saying them, so the route
+		// read-outs fall away with the destination rather than freezing.
+		metrics = metrics.filter { name, metric in
+			guard let lifetime = PriorityResolver.lifetime(for: name) else { return true }
+			return now.timeIntervalSince(metric.timestamp) < lifetime
 		}
 
 		// Last-resort heading: when neither a NMEA/NMEA 2000 heading nor the

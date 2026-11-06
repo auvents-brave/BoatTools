@@ -336,8 +336,11 @@ public enum NMEASimulator {
 		let reportedCourse = courseDegrees + cogWander
 		let reportedSpeed = speedKnots > 0 ? max(0, speedKnots + sogWander) : 0
 
-		let heading = courseDegrees + leewayDegrees(n)
-		let throughWater = speedKnots > 0 ? max(0, speedKnots + stwOffset(n)) : 0
+		let current = currentVector(n)
+		let water = throughWater(course: courseDegrees, speedKnots: speedKnots, current: current)
+		let leeway = leewayDegrees(n)
+		let heading = (speedKnots > 0 ? water.direction : courseDegrees) + leeway
+		let throughWater = speedKnots > 0 ? water.speed : 0
 		let trueWindDir = trueWindDirection(n)
 		let trueWindSpd = trueWindSpeed(n)
 		let apparent = apparentWind(
@@ -363,6 +366,21 @@ public enum NMEASimulator {
 			data: windPayload(
 				speedKnots: apparent.speed,
 				angleDegrees: apparent.angle, reference: 2),
+			into: continuation)
+		yieldFrame(
+			pgn: 129291, data: setAndDriftPayload(set: current.set, driftKnots: current.drift),
+			into: continuation)
+		yieldFrame(pgn: 128000, data: leewayPayload(degrees: leeway), into: continuation)
+		// The sailing VMG travels on no PGN at all, only on VPW — so the one
+		// sentence in an otherwise NMEA 2000 passage, as a performance processor
+		// bridged onto the bus would send it. Off the bow, as an instrument
+		// computes it: speed through the water along the wind axis, positive to
+		// windward.
+		let sailingVMG =
+			throughWater * cos(twaRadians(heading: heading, trueWindDirection: trueWindDir))
+		yieldSentence(
+			type: "VPW",
+			fields: [String(format: "%.2f", sailingVMG), "N", "", "M"],
 			into: continuation)
 		yieldFrame(pgn: 130314, data: pressurePayload(hPa: pressureHPa(n)), into: continuation)
 		yieldFrame(
@@ -532,9 +550,29 @@ public enum NMEASimulator {
 		-6 + 2.5 * sin(n * 0.003)
 	}
 
-	/// Speed-through-water oscillation around the cruising speed (knots).
-	static func stwOffset(_ n: Double) -> Double {
-		0.4 * sin(n * 0.05) + 0.15 * sin(n * 0.013)
+	/// The tidal stream the passage is set in: half a knot or so, veering slowly.
+	/// `set` is where the water flows *to*, which is the convention for a current
+	/// and the opposite of the one for wind.
+	static func currentVector(_ n: Double) -> (set: Double, drift: Double) {
+		(set: normalise(215 + 18 * sin(n * 0.0024)), drift: 0.55 + 0.25 * sin(n * 0.0041))
+	}
+
+	/// The track through the water a boat must make to hold a course over the
+	/// ground against a stream: the ground velocity less the current's.
+	///
+	/// This is what gives the simulated passage a speed through the water that
+	/// differs from its speed over the ground, and a heading that differs from
+	/// its course — so a consumer that arbitrates the two sees a coherent pair
+	/// rather than noise.
+	static func throughWater(
+		course: Double, speedKnots: Double, current: (set: Double, drift: Double)
+	) -> (direction: Double, speed: Double) {
+		let ground = course * .pi / 180
+		let set = current.set * .pi / 180
+		let east = speedKnots * sin(ground) - current.drift * sin(set)
+		let north = speedKnots * cos(ground) - current.drift * cos(set)
+		let speed = (east * east + north * north).squareRoot()
+		return (normalise(atan2(east, north) * 180 / .pi), speed)
 	}
 
 	/// Derives apparent wind (speed in knots, angle in degrees off the bow, 0–360)
@@ -583,6 +621,32 @@ public enum NMEASimulator {
 		if let metrics = NMEA2000Decoder.decode(pgn: pgn, data: data) {
 			for metric in metrics { continuation.yield(.metric(metric)) }
 		}
+	}
+
+	/// Yields one NMEA 0183 sentence and the metrics it decodes to, the way
+	/// ``yieldFrame`` does for a PGN.
+	private static func yieldSentence(
+		talker: String = "II",
+		type: String,
+		fields: [String],
+		into continuation: AsyncThrowingStream<NMEAFrame, any Error>.Continuation
+	) {
+		let all = [talker + type] + fields
+		let body = all.joined(separator: ",")
+		let sentence = String(format: "$%@*%02X", body, NMEA0183Parser.xorChecksum(body))
+		continuation.yield(
+			.nmea0183(sentence: sentence, talker: talker, type: type, fields: all))
+		if let metrics = NMEA0183Parser.decode(all) {
+			for metric in metrics { continuation.yield(.metric(metric)) }
+		}
+	}
+
+	/// The true wind angle off the bow in radians, signed, from the heading and
+	/// the direction the wind blows from.
+	private static func twaRadians(heading: Double, trueWindDirection twd: Double) -> Double {
+		var twa = (twd - heading).truncatingRemainder(dividingBy: 360)
+		if twa > 180 { twa -= 360 } else if twa < -180 { twa += 360 }
+		return twa * .pi / 180
 	}
 
 	// MARK: PGN encoders (mirrors of the decoders in NMEAParsers)
@@ -935,6 +999,27 @@ public enum NMEASimulator {
 		put(littleEndian(Int32((target.latitude * 1e7).rounded())), at: 24)
 		put(littleEndian(Int32((target.longitude * 1e7).rounded())), at: 28)
 		put(littleEndian(UInt16(bitPattern: Int16((speedKnots / 1.94384 / 0.01).rounded()))), at: 32)
+		return d
+	}
+
+	/// PGN 129291 — Set & Drift, Rapid Update: the stream's direction (referenced
+	/// to true north) and its rate.
+	private static func setAndDriftPayload(set: Double, driftKnots: Double) -> [UInt8] {
+		var d = [UInt8](repeating: 0xFF, count: 8)
+		d[0] = 0
+		d[1] = 0  // set referenced to true north
+		let direction = littleEndian(UInt16((normalise(set) * .pi / 180 * 1e4).rounded()))
+		let rate = littleEndian(UInt16((driftKnots * knotsToMetresPerSecond / 0.01).rounded()))
+		for (k, b) in (direction + rate).enumerated() { d[2 + k] = b }
+		return d
+	}
+
+	/// PGN 128000 — Leeway Angle: signed, in units of 1e-4 rad.
+	private static func leewayPayload(degrees: Double) -> [UInt8] {
+		var d = [UInt8](repeating: 0xFF, count: 8)
+		d[0] = 0
+		let angle = littleEndian(UInt16(bitPattern: Int16((degrees * .pi / 180 * 1e4).rounded())))
+		for (k, b) in angle.enumerated() { d[1 + k] = b }
 		return d
 	}
 

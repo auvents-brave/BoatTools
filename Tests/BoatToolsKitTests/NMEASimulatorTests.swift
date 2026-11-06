@@ -226,6 +226,8 @@ struct NMEASimulatorTests {
 			"gps.hdop", "gps.vdop", "gps.pdop", "gps.satellites", "gps.snr.avg",
 			"windlass.0.anchorUp", "log.total", "depth", "humidity", "TWS.gust",
 			"navigation.distanceToWaypoint", "navigation.xte", "navigation.eta", "navigation.vmg",
+			"navigation.currentSet", "navigation.currentDrift", "navigation.leeway",
+			"navigation.vmgWind",
 		]
 		for name in expected {
 			#expect(metric(name, in: frames) != nil, "missing \(name)")
@@ -376,4 +378,71 @@ struct NMEASimulatorTests {
 		// First and last fixes span different ticks, so the boat must have moved.
 		#expect(lats.first != lats.last || lons.first != lons.last)
 	}
+	// MARK: Stream, leeway and the sailing VMG
+
+	@Test("A stream sets the water track apart from the ground track")
+	func streamSeparatesWaterAndGroundTracks() {
+		// Dead astern: the stream pushes the boat along, so it needs less speed
+		// through the water to hold the same speed over the ground.
+		let astern = NMEASimulator.throughWater(
+			course: 90, speedKnots: 6, current: (set: 90, drift: 1))
+		#expect(abs(astern.speed - 5) < 0.001)
+		#expect(abs(astern.direction - 90) < 0.001)
+
+		// On the nose: it has to make more.
+		let ahead = NMEASimulator.throughWater(
+			course: 90, speedKnots: 6, current: (set: 270, drift: 1))
+		#expect(abs(ahead.speed - 7) < 0.001)
+
+		// Abeam: the water track points upstream of the course made good.
+		let abeam = NMEASimulator.throughWater(
+			course: 0, speedKnots: 6, current: (set: 90, drift: 1))
+		#expect(abeam.direction < 360 && abeam.direction > 340)
+	}
+
+	@Test("The passage reports the stream it is set in, and its leeway")
+	func reportsCurrentAndLeeway() async throws {
+		let stream = NMEASimulator.frameStream(
+			route: .monacoToMaddalena, speedKnots: 6, loop: false
+		)
+		let frames = try await framesUntil(ticks: 2, stream)
+
+		let expected = NMEASimulator.currentVector(0)
+		#expect(abs((metric("navigation.currentSet", in: frames) ?? .nan) - expected.set) < 0.02)
+		#expect(abs((metric("navigation.currentDrift", in: frames) ?? .nan) - expected.drift) < 0.02)
+		#expect(
+			abs((metric("navigation.leeway", in: frames) ?? .nan) - NMEASimulator.leewayDegrees(0))
+				< 0.02)
+	}
+
+	@Test("The sailing VMG goes out on VPW, the only carrier there is")
+	func sendsSailingVMGOnVPW() async throws {
+		let stream = NMEASimulator.frameStream(
+			route: .monacoToMaddalena, speedKnots: 6, loop: false
+		)
+		let frames = try await framesUntil(ticks: 2, stream)
+
+		// The sentence itself, checksum and all, has to parse.
+		let sentence = frames.compactMap { frame -> String? in
+			if case .nmea0183(let text, _, "VPW", _) = frame { return text }
+			return nil
+		}.first
+		let text = try #require(sentence, "the passage sends no VPW")
+		guard case .nmea0183? = NMEA0183Parser.parse(text) else {
+			Issue.record("VPW did not parse: \(text)")
+			return
+		}
+
+		// And it has to agree with the speed through the water and the wind: the
+		// component along the wind axis can never exceed the boat's own speed.
+		let vmg = try #require(metric("navigation.vmgWind", in: frames))
+		let stw = try #require(metric("STW", in: frames))
+		#expect(abs(vmg) <= stw + 0.01)
+		// Monaco to Cap Corse runs south-east with the breeze in the north-west,
+		// so the passage starts on a run: the boat makes good to leeward, which
+		// the sentence states with a negative figure.
+		#expect(vmg < 0)
+		#expect(abs(vmg) > 0.8 * stw, "nearly dead downwind, so most of the speed counts")
+	}
+
 }

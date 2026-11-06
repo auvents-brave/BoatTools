@@ -68,6 +68,8 @@ public enum NMEA0183Parser {
 	/// supported sentence in user-facing displays.
 	public static let decodedTypes: Set<String> = [
 		"RMC", "MWV", "DPT", "DBT", "VBW", "VHW",
+		"VDR", "VPW", "WCV",  // current, the sailing VMG, waypoint closure
+		"VWT", "MTA", "MMB",  // decoded all along, but never listed here
 		"HDT", "HDG", "HDM", "MWD", "VTG",
 		"GLL", "XDR",
 		"GGA", "GSA", "GNS", "GST", "GSV",
