@@ -367,6 +367,16 @@ public enum NMEASimulator {
 				speedKnots: apparent.speed,
 				angleDegrees: apparent.angle, reference: 2),
 			into: continuation)
+		// The same breeze boat-referenced, which is how the true wind angle
+		// reaches the bus — a display computes the sailing VMG and the target
+		// angles from it, and nothing else carries it.
+		yieldFrame(
+			pgn: 130306,
+			data: windPayload(
+				speedKnots: trueWindSpd,
+				angleDegrees: twaRadians(heading: heading, trueWindDirection: trueWindDir) * 180 / .pi,
+				reference: 3),
+			into: continuation)
 		yieldFrame(
 			pgn: 129291, data: setAndDriftPayload(set: current.set, driftKnots: current.drift),
 			into: continuation)

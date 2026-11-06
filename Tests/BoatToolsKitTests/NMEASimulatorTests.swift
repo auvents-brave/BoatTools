@@ -407,6 +407,13 @@ struct NMEASimulatorTests {
 		)
 		let frames = try await framesUntil(ticks: 2, stream)
 
+		// The boat-referenced wind too, so the wind angle off the bow is on the
+		// bus and not only the direction the breeze blows from.
+		let twa = try #require(metric("TWA", in: frames))
+		let twd = try #require(metric("TWD", in: frames))
+		#expect(twa >= 0 && twa <= 360)
+		#expect(abs(twd - NMEASimulator.trueWindDirection(0)) < 0.5)
+
 		let expected = NMEASimulator.currentVector(0)
 		#expect(abs((metric("navigation.currentSet", in: frames) ?? .nan) - expected.set) < 0.02)
 		#expect(abs((metric("navigation.currentDrift", in: frames) ?? .nan) - expected.drift) < 0.02)
