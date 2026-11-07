@@ -2,6 +2,11 @@
 
 Inventory of the NMEA 0183 sentences, NMEA 2000 PGNs, and Signal K paths recognised by BoatTools, together with the canonical metric name that each one emits.
 
+Everything below is *read* off the wire. The values BoatTools works out for
+itself — the leeway, the true wind behind an apparent-only masthead unit, the
+tidal stream, both velocities made good — carry a `.computed` suffix and are
+documented in [`METRIC_STORE.md`](METRIC_STORE.md#derived-values).
+
 ---
 
 ## NMEA 0183

@@ -763,6 +763,8 @@ public final class BoatMetricStore {
 		activeWaypointNumber = nil
 		routeWaypointNames.removeAll()
 		headingDerivedFromCOG = false
+		// The smoothed stream belongs to the previous source as well.
+		currentFilter.reset()
 		clearAIS()
 	}
 
@@ -1011,6 +1013,8 @@ public final class BoatMetricStore {
 			satellites[report.constellation] = report.satellites
 		}
 
+		deriveNavigation(at: now)
+
 		#if canImport(Darwin)
 			writeAppGroupSnapshot(at: now)
 		#endif
@@ -1018,6 +1022,107 @@ public final class BoatMetricStore {
 
 	private func feedHistory(name: String, value: Double, at now: Date) {
 		histories.add(name: name, value: value, at: now)
+	}
+
+	// MARK: Derived values
+
+	/// Smooths the computed tidal stream from one flush to the next.
+	private var currentFilter = CurrentFilter()
+
+	/// Works out the values the network does not state — or states alongside —
+	/// and publishes them under their ``DerivedNavigation/suffix`` names.
+	///
+	/// This runs after arbitration, so it reads resolved values, and it rebuilds
+	/// every derived metric from scratch, so none can go stale and none can ever
+	/// occupy the slot of a measured one.
+	///
+	/// A measured `navigation.leeway` is taken to follow the same convention as
+	/// the one derived here — positive to starboard, so `waterTrack = heading +
+	/// leeway`. PGN 128000 does not state its sign convention, so that is an
+	/// assumption, and a source that disagrees would tilt the computed stream by
+	/// twice the leeway.
+	private func deriveNavigation(at now: Date) {
+		for name in DerivedNavigation.names { metrics[name] = nil }
+
+		func value(_ name: String) -> Double? { metrics[name]?.value }
+		func publish(_ name: String, _ value: Double, _ unit: String) {
+			metrics[name + DerivedNavigation.suffix] = BoatMetric(
+				name: name + DerivedNavigation.suffix, value: value, unit: unit, timestamp: now)
+		}
+
+		// A COG-derived heading is not a heading: feeding it back in would turn
+		// the computed stream into a bare speed difference along the course.
+		let heading: Double? = {
+			if !headingDerivedFromCOG, let trueHeading = value("HDG.true") { return trueHeading }
+			if let magnetic = value("HDG.magnetic"), let variation = value("magneticVariation") {
+				return DerivedNavigation.normalise(magnetic + variation)
+			}
+			return nil
+		}()
+		let stw = value("STW")
+		let cog = value("COG")
+		let sog = value("SOG")
+
+		// Leeway, where a two-axis log reports the athwartships component.
+		var leeway = value("navigation.leeway")
+		if let transverse = value("speed.water.transverse"), let stw,
+			let measured = DerivedNavigation.leeway(transverseWater: transverse, speedThroughWater: stw)
+		{
+			publish("navigation.leeway", measured, "°")
+			if leeway == nil { leeway = measured }
+		}
+
+		// The track through the water: the heading, bent by the leeway.
+		let waterTrack = heading.map { DerivedNavigation.normalise($0 + (leeway ?? 0)) }
+
+		// The true wind from the apparent, in both references.
+		var waterWind: (speed: Double, direction: Double)?
+		var groundWind: (speed: Double, direction: Double)?
+		if let apparentSpeed = value("AWS"), let apparentAngle = value("AWA"), let heading {
+			if let waterTrack, let stw {
+				waterWind = DerivedNavigation.trueWind(
+					apparentSpeed: apparentSpeed, apparentAngle: apparentAngle,
+					heading: heading, track: waterTrack, speed: stw)
+			}
+			if let cog, let sog {
+				groundWind = DerivedNavigation.trueWind(
+					apparentSpeed: apparentSpeed, apparentAngle: apparentAngle,
+					heading: heading, track: cog, speed: sog)
+			}
+		}
+		if let waterWind, let heading {
+			publish("TWS", waterWind.speed, "kn")
+			publish("TWD", waterWind.direction, "°")
+			// Off the bow, the way an instrument reports it.
+			publish("TWA", DerivedNavigation.signed(waterWind.direction - heading), "°")
+		}
+
+		// The tidal stream.
+		if let waterTrack, let stw, let cog, let sog {
+			let components = DerivedNavigation.streamComponents(
+				courseOverGround: cog, speedOverGround: sog,
+				waterTrack: waterTrack, speedThroughWater: stw)
+			let stream = currentFilter.update(east: components.east, north: components.north, at: now)
+			publish("navigation.currentSet", stream.set, "°")
+			publish("navigation.currentDrift", stream.drift, "kn")
+		}
+
+		// Both velocities made good: along the wind over the water for the trim,
+		// along the wind over the ground for the chart. The wind a source states
+		// stands in where the apparent is missing, whatever its own reference.
+		let statedWind =
+			value("TWD")
+			?? heading.flatMap { h in value("TWA").map { DerivedNavigation.normalise(h + $0) } }
+		if let waterTrack, let stw, let wind = waterWind?.direction ?? statedWind {
+			publish(
+				"navigation.vmgWind",
+				DerivedNavigation.velocityMadeGood(speed: stw, track: waterTrack, windDirection: wind), "kn")
+		}
+		if let cog, let sog, let wind = groundWind?.direction ?? statedWind {
+			publish(
+				"navigation.vmgWindGround",
+				DerivedNavigation.velocityMadeGood(speed: sog, track: cog, windDirection: wind), "kn")
+		}
 	}
 
 	/// Pre-fills a metric's curve history with synthetic past samples, so graphs

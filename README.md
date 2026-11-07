@@ -165,9 +165,12 @@ frames to the clients and the metric store and let them dispatch.
 - NMEA enums: `TalkerId`, `MessageId`, `AisMessageType`, `NavigationStatus`, `ManeuverIndicator`, `ShipType`, `NavigationalAidType`.
 
 **Metric store** — observable aggregation of resolved metrics. See [`METRIC_STORE.md`](METRIC_STORE.md).
-- `BoatMetricStore` — `@Observable @MainActor` store; feed it `NMEAFrame` or `BoatMetric` values via `feed(_:)`, `feedSignalK(_:)`, `feedMetric(_:)`, `feedMetrics(_:)`, or the async-stream piping helpers `pipe(_:)` / `pipeSignalK(_:)` / `pipeMetrics(_:)`. AIS exposes `aisTargets`, `ownShip` (own MMSI excluded from targets) and `isStale(_:)`. `labels` / `setLabels(_:)` carry human display names for metric prefixes (e.g. `battery.0` → "Lynx 24"). `clear()` / `clearAIS()` reset published state when switching source or disconnecting — `clear()` also resets the pending one-second window so stale frames cannot resurface on the next tick. Values hold until the source is dropped, with one exception: the `navigation.` family is retired 15 s after its last report, because a plotter stops broadcasting the route sentences when the destination is deactivated instead of saying so.
+- `BoatMetricStore` — `@Observable @MainActor` store; feed it `NMEAFrame` or `BoatMetric` values via `feed(_:)`, `feedSignalK(_:)`, `feedMetric(_:)`, `feedMetrics(_:)`, or the async-stream piping helpers `pipe(_:)` / `pipeSignalK(_:)` / `pipeMetrics(_:)`. AIS exposes `aisTargets`, `ownShip` (own MMSI excluded from targets) and `isStale(_:)`. `labels` / `setLabels(_:)` carry human display names for metric prefixes (e.g. `battery.0` → "Lynx 24"). `clear()` / `clearAIS()` reset published state when switching source or disconnecting — `clear()` also resets the pending one-second window so stale frames cannot resurface on the next tick. Values the network states hold until the source is dropped, with one exception: the `navigation.` family is retired 15 s after its last report, because a plotter stops broadcasting the route sentences when the destination is deactivated instead of saying so.
 - `ConnectionMultiplexer` — `@Observable @MainActor`; feeds several live sources into one `BoatMetricStore` at once for a "listen to everything" mode, owning one task per source, tracking each source's liveness (`SourceState`: `.connecting` / `.ended` / `.failed`) and tearing them all down together.
 - `TimedSample`, `RingBuffer<T>`, `TieredHistory`, `PressureHistory` — history primitives backing the store's `windTWS`, `sog`, `vmgWind`, `pressure`, etc.
+
+**Derived navigation** — what the wire did not state, worked out from what it did.
+- `DerivedNavigation` — the leeway a two-axis log measures outright (`atan(transverse / longitudinal)`), the true wind behind a masthead unit that reports only the apparent, the tidal stream as the ground track less the water track, and both velocities made good — along the wind over the water for the trim, along the wind over the ground for the chart. `BoatMetricStore` runs them on every flush, after arbitration, and publishes each one under its own name suffixed `.computed` (`DerivedNavigation.names`): a computed figure never occupies the slot of a measured one, so it can neither mask it nor be mistaken for it, and the two can be read against each other. The angle conventions are stated on the type; a COG-derived heading is refused as an input, and the stream is filtered as a vector by `CurrentFilter`. Full rationale in [`METRIC_STORE.md`](METRIC_STORE.md#derived-values).
 
 **Clients** — talk to live data sources.
 - `SignalKClient` — REST snapshots (`snapshot(...)`), WebSocket live stream (`liveStream(...)`), and raw NDJSON delta streams over TCP / UDP (`tcpStream(...)`, `udpStream(...)`), with token- or password-based auth (`login(...)`).
@@ -217,6 +220,7 @@ How decoded values are normalised, prioritised across talkers, deduplicated and 
 - [BoatTools — Metric Store Design](METRIC_STORE.md)
   - [Architecture overview](METRIC_STORE.md#architecture-overview)
   - [Priority tables](METRIC_STORE.md#priority-tables)
+  - [Derived values](METRIC_STORE.md#derived-values)
   - [Value lifetime](METRIC_STORE.md#value-lifetime)
   - [Non-numeric data](METRIC_STORE.md#non-numeric-data)
   - [Complete `metrics` dictionary coverage](METRIC_STORE.md#complete-metrics-dictionary-coverage)

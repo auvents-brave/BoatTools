@@ -99,17 +99,32 @@ struct NMEASimulatorTests {
 		#expect(pgns.contains(129026))
 	}
 
-	@Test("Heading sits a few degrees off the course (leeway)")
+	@Test("The bow sits off the water track by exactly the leeway reported")
 	func headingDiffersFromCourse() async throws {
 		let stream = NMEASimulator.frameStream(
 			route: .monacoToMaddalena, speedKnots: 6, loop: false
 		)
-		let frames = try await firstFrames(stream, count: 12)
+		// Two ticks: every metric below then comes from the first one, where the
+		// simulated GPS wander is exactly zero, so the vectors must close.
+		let frames = try await framesUntil(ticks: 2, stream)
 		let cog = try #require(metric("COG", in: frames))
+		let sog = try #require(metric("SOG", in: frames))
 		let hdg = try #require(metric("HDG.true", in: frames))
-		var diff = abs(hdg - cog).truncatingRemainder(dividingBy: 360)
-		if diff > 180 { diff = 360 - diff }
-		#expect(diff > 2 && diff < 12)
+		let leeway = try #require(metric("navigation.leeway", in: frames))
+		let set = try #require(metric("navigation.currentSet", in: frames))
+		let drift = try #require(metric("navigation.currentDrift", in: frames))
+
+		// The track she must be making through the water: her ground vector
+		// less the stream she reports being set in.
+		let components = DerivedNavigation.streamComponents(
+			courseOverGround: cog, speedOverGround: sog, waterTrack: set, speedThroughWater: drift)
+		let waterTrack = DerivedNavigation.normalise(
+			atan2(components.east, components.north) * 180 / .pi)
+
+		// The convention the whole library works to: waterTrack = heading + leeway.
+		#expect(abs(DerivedNavigation.signed(hdg + leeway - waterTrack)) < 0.5)
+		// And she really is slipping, so the bow is not on her water track.
+		#expect(abs(leeway) > 2)
 	}
 
 	@Test("Wind, speed-through-water and pressure are emitted")

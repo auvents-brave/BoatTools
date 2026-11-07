@@ -19,6 +19,9 @@ NMEATransport / SignalKClient
         │
         │  FlushResult { metrics, aisTargets, satelliteReports }
         ▼
+  DerivedNavigation       ← computes what the wire did not state, as `.computed`
+        │
+        ▼
   BoatMetricStore                   ← @Observable, one instance per app
     ├── metrics: [String: BoatMetric]       ← all numeric values, always best known
     ├── aisTargets: [Int: AISTarget]         ← keyed by MMSI, updated on every report
@@ -259,6 +262,63 @@ No conflicts expected (each metric is keyed by instance index). Pass through dir
 
 ---
 
+## Derived values
+
+Some of what a navigator wants is not on the wire at all. A masthead unit may
+report only the apparent wind; no instrument states a current unless something
+upstream has already worked it out; and the sailing VMG has no PGN. So after
+arbitration the store computes what it can from what it resolved, in
+`DerivedNavigation`.
+
+**Every computed value is published under its own name, suffixed
+`.computed`.** It never occupies the slot of a measured metric, so it can
+neither mask one nor be mistaken for one, and the two sit side by side for
+comparison. Nothing in the priority tables above applies to them; they are not
+candidates, they are conclusions.
+
+| Metric | From | Notes |
+|---|---|---|
+| `navigation.leeway.computed` | `speed.water.transverse` + `STW` | `atan(transverse / longitudinal)`. A *measurement*, not a model — only Doppler and ultrasonic logs report the athwartships component |
+| `TWS.computed`, `TWD.computed`, `TWA.computed` | `AWS`, `AWA`, `STW`, heading (+ leeway) | vector subtraction of the boat's motion. Water-referenced: the wind the sails feel, and the one a polar is drawn against |
+| `navigation.currentSet.computed`, `navigation.currentDrift.computed` | `COG`, `SOG`, `STW`, heading (+ leeway) | ground track less water track, filtered — see below |
+| `navigation.vmgWind.computed` | `STW`, water track, wind direction | `STW · cos(TWA)`, signed, positive to windward |
+| `navigation.vmgWindGround.computed` | `SOG`, `COG`, wind direction | the same projection over the ground: what actually closes a windward mark |
+
+Three things make the difference between a figure worth showing and noise:
+
+**The angle conventions.** Directions are degrees true over 0…360; angles off
+the bow are signed, positive to starboard; and the leeway is the angle from the
+heading to the track through the water, so `waterTrack = heading + leeway`. PGN
+128000 does not state its sign convention, so a measured leeway is *assumed* to
+follow the same one — a source that disagrees would tilt the computed stream by
+twice the leeway.
+
+**The heading has to be a heading.** The store publishes a COG-derived
+`HDG.true` as a last resort (see [Architecture overview](#architecture-overview)),
+and feeding that back in would turn the computed stream into a bare speed
+difference along the course. The derivation refuses it and falls back to
+`HDG.magnetic` + `magneticVariation`, or abstains. There is no geomagnetic model
+in the library, so without a variation on the wire a magnetic-only heading
+yields nothing.
+
+**The stream needs filtering.** It is a small difference of two large vectors:
+a heading error of 5° at 6 knots is worth half a knot of phantom stream, and the
+hundredth-of-a-knot step the speed PGNs quantise to is worth a degree and a half
+of set. `CurrentFilter` runs an exponential filter over the east and north
+components — never over the angle, whose arithmetic mean of 355° and 5° is 180°,
+the reciprocal — with a one-minute time constant: enough to ride out GPS and log
+noise, short enough to follow a stream that turns over hours. The first sample
+passes through unfiltered so a fresh connection shows a stream at once, and
+`clear()` resets it with the source.
+
+What is *not* derived, and why: the leeway from a heel coefficient (`K · heel /
+STW²`) needs a per-boat `K`, so it belongs to the host application's settings
+rather than here; and a predicted tidal stream from a harmonic atlas is a
+forecast, not a measurement, and has no business in a store fed by the boat's
+own instruments.
+
+---
+
 ## Value lifetime
 
 A value is normally published until the source is dropped: an echo sounder that
@@ -318,6 +378,7 @@ The `metrics` dict holds **every** `BoatMetric` produced by the priority resolve
 | Tanks (per instance) | `fuel.0.level`, `water.0.level`, `blackwater.0.level`, … |
 | Autopilot / routing | `navigation.xte`, `navigation.bearingToDest`, `navigation.distanceToWaypoint`, `navigation.vmg` |
 | Performance | `navigation.vmgWind`, `navigation.currentSet`, `navigation.currentSet.magnetic`, `navigation.currentDrift`, `navigation.leeway` |
+| Computed | `TWS.computed`, `TWD.computed`, `TWA.computed`, `navigation.leeway.computed`, `navigation.currentSet.computed`, `navigation.currentDrift.computed`, `navigation.vmgWind.computed`, `navigation.vmgWindGround.computed` |
 | Waypoint | `waypoint.lat`, `waypoint.lon` |
 | Log | `log.total`, `log.trip` |
 | Time | `utc.timestamp` |
@@ -434,6 +495,7 @@ Everything described above is implemented in `BoatToolsKit`:
 - `RingBuffer<T>`, `TieredHistory`, `PressureHistory` are public history primitives.
 - `BoatMetricStore.isStale(_:)` reports staleness; targets older than 10 minutes are flagged, 30 minutes removed.
 - `PriorityResolver.lifetime(for:)` gives each metric its horizon; the flush drops the values past it.
+- `DerivedNavigation` (public) holds the formulas and the names it produces; `CurrentFilter` (internal) smooths the computed stream. The store rebuilds every derived value on each flush, after arbitration.
 - The Darwin AppGroup JSON snapshot is written from `BoatMetricStore.flushSharedDefaults()` whenever a non-nil `appGroupID` was passed to `init`.
 
 To feed the store from a transport, use one of the async-stream piping helpers on `BoatMetricStore`:

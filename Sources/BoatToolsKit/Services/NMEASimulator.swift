@@ -349,13 +349,21 @@ public enum NMEASimulator {
 		let current = currentVector(n)
 		let water = throughWater(course: courseDegrees, speedKnots: speedKnots, current: current)
 		let leeway = leewayDegrees(n)
-		let heading = (speedKnots > 0 ? water.direction : courseDegrees) + leeway
+		// The leeway is the angle from the heading to the track through the water,
+		// positive to starboard, so the bow sits off the water track by as much
+		// as she slips: `waterTrack = heading + leeway`.
+		let heading = normalise((speedKnots > 0 ? water.direction : courseDegrees) - leeway)
 		let throughWater = speedKnots > 0 ? water.speed : 0
+		let waterTrack = speedKnots > 0 ? water.direction : courseDegrees
 		let trueWindDir = trueWindDirection(n)
 		let trueWindSpd = trueWindSpeed(n)
-		let apparent = apparentWind(
+		// The boat travels along her water track, not along her heading, so the
+		// apparent wind is composed around the track and then read off the bow —
+		// which is where the vane sits.
+		let apparentOnTrack = apparentWind(
 			trueSpeed: trueWindSpd, trueDirection: trueWindDir,
-			heading: heading, boatSpeed: throughWater)
+			heading: waterTrack, boatSpeed: throughWater)
+		let apparent = (speed: apparentOnTrack.speed, angle: normalise(apparentOnTrack.angle + leeway))
 
 		yieldFrame(pgn: 129025, data: positionRapidPayload(position), into: continuation)
 		yieldFrame(
@@ -397,7 +405,7 @@ public enum NMEASimulator {
 		// computes it: speed through the water along the wind axis, positive to
 		// windward.
 		let sailingVMG =
-			throughWater * cos(twaRadians(heading: heading, trueWindDirection: trueWindDir))
+			throughWater * cos(twaRadians(heading: waterTrack, trueWindDirection: trueWindDir))
 		yieldSentence(
 			type: "VPW",
 			fields: [String(format: "%.2f", sailingVMG), "N", "", "M"],
