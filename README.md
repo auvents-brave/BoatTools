@@ -4,8 +4,8 @@ Swift CLI tools to explore sailboat data sources, in **strict concurrency mode**
 
 The package ships two products:
 
-- **`BoatToolsKit`** — library, multiplatform. All the business logic: NMEA / Signal K / Victron VRM clients, parsers, Bonjour discovery, on-device sensors on every platform (read directly on Apple, pushed in by the host app elsewhere), offline sunrise / solar noon / sunset, and lookups against public services — WMO for GMDSS forecasts, Wikimedia for vessel photographs.
-- **`boattools`** — executable, ArgumentParser-based CLI on top of the library. Nine subcommands: `connect`, `devices`, `pilot`, `windlass`, `file`, `vrm`, `discover`, `gmdss`, `simulate`. The device-sensor fallback is a `BoatToolsKit` feature only — it is not exposed by the CLI.
+- **`BoatToolsKit`** — library, multiplatform. All the business logic: NMEA / Signal K / Victron VRM clients, parsers, Bonjour discovery, on-device sensors on every platform (read directly on Apple, pushed in by the host app elsewhere), offline sunrise / solar noon / sunset, offline harmonic prediction of tidal streams, and lookups against public services — WMO for GMDSS forecasts, Wikimedia for vessel photographs.
+- **`boattools`** — executable, ArgumentParser-based CLI on top of the library. Ten subcommands: `connect`, `devices`, `pilot`, `windlass`, `file`, `vrm`, `discover`, `gmdss`, `simulate`, `tide`. The device-sensor fallback is a `BoatToolsKit` feature only — it is not exposed by the CLI.
 
 A third piece lives in the nested [`Bridge/`](Bridge) package:
 **libBoatToolsBridge**, a dynamic library exposing `BoatToolsKit` through a
@@ -211,6 +211,12 @@ frames to the clients and the metric store and let them dispatch.
 - `SunTimes` — sunrise, solar noon and sunset of a local day at a position (NOAA solar calculator algorithm, about a minute's accuracy up to ±72° latitude); `Horizon` selects the official events or civil / nautical / astronomical dawn and dusk; `polar` reports a day when the Sun neither rises nor sets. `SunTimes.upcoming(latitude:longitude:after:)` gives the next sunrise, solar noon and sunset as `SunEvent`s, soonest first — what the apps' Sun pill shows. The bridge exposes them as `boattools_bridge_sun_times` and `boattools_bridge_sun_upcoming`.
 
 **Parsing** — most parsers are internal. The one exposed type:
+**Tidal streams** — predicted, offline, from a harmonic atlas. See [`TIDAL_STREAMS.md`](TIDAL_STREAMS.md).
+
+- `TidalStreamAtlas` — reads a converted FES2014a current atlas and predicts the stream at a position and instant, as a set and a drift in the same convention the measured stream uses. The expensive half of a prediction does not depend on position, so `TidalAstronomy(date:)` can be worked out once and passed in for a whole chart's worth of points. A node ashore drops out of the interpolation and the rest take up its weight; the components are stored in phase and in quadrature because a phase cannot be interpolated. A prediction is a forecast, so it never enters `BoatMetricStore`.
+- `TidalConstituent` / `TidalAstronomy` — the harmonic machinery: five Doodson coefficients per constituent with the speed derived from them rather than tabulated beside them, Schureman's nodal corrections for the Moon's 18.6-year node, and the equilibrium argument referred to Greenwich mean noon. 33 constituents; the corrections are cross-checked against Doodson and Warburg's published series.
+- `Scripts/fes-currents-to-atlas.py` — cuts a box out of the FES NetCDF files and writes the compact format the reader takes. The atlas data is not redistributable with this library: see [`TIDAL_STREAMS.md`](TIDAL_STREAMS.md#getting-the-data).
+
 - `NMEA0183Parser` — stateless sentence parser used by the CLI to filter decoded vs unknown sentence types. NMEA 2000, AIS, SeaSmart, Canboat, iKonvert and YD RAW decoders are reached indirectly through `NMEATransport`. Full decoder coverage in [`DECODERS.md`](DECODERS.md).
 
 ## Metric store design
@@ -241,6 +247,18 @@ Which NMEA 0183 sentences, NMEA 2000 PGNs and Signal K paths `BoatToolsKit` deco
   - [Index by canonical metric](DECODERS.md#index-by-canonical-metric)
   - [Transmitted frames (outbound)](DECODERS.md#transmitted-frames-outbound) — the pilot / windlass / roll-call frames the library sends
 
+## Tidal stream prediction
+
+Where the atlas comes from, how it is converted, the file format and the harmonic maths behind a predicted stream. Full document: [`TIDAL_STREAMS.md`](TIDAL_STREAMS.md).
+
+- [BoatTools — Tidal streams](TIDAL_STREAMS.md)
+  - [Getting the data](TIDAL_STREAMS.md#getting-the-data)
+  - [Converting it](TIDAL_STREAMS.md#converting-it)
+  - [The file format](TIDAL_STREAMS.md#the-file-format)
+  - [Predicting with it](TIDAL_STREAMS.md#predicting-with-it)
+  - [How the prediction works](TIDAL_STREAMS.md#how-the-prediction-works)
+  - [What it cannot tell you](TIDAL_STREAMS.md#what-it-cannot-tell-you)
+
 ## Commands
 
 ```
@@ -253,6 +271,7 @@ boattools vrm        — Victron VRM cloud
 boattools discover   — LAN discovery via Bonjour/mDNS
 boattools gmdss      — official GMDSS high-seas forecasts (WMO WWMIWS)
 boattools simulate   — replay a synthetic NMEA 2000 passage
+boattools tide       — predicted tidal streams from a converted FES atlas
 boattools --version  — print the version string
 ```
 
@@ -616,3 +635,20 @@ realistic.
 ./boattools simulate                              # Monaco → La Maddalena at 6 kn
 ./boattools simulate --speed 8 --fast 50          # faster passage, fast-forwarded
 ```
+
+### Predicted tidal streams
+
+Reads an atlas converted from FES2014a and predicts the stream offline — a
+forecast, not a measurement, and no part of the metric store. The atlas data is
+not shipped with the library: see
+[`TIDAL_STREAMS.md`](TIDAL_STREAMS.md#getting-the-data) for where it comes from
+and how to cut a box out of it.
+
+```sh
+./boattools tide --atlas channel.btsa --info                      # grid and constituents
+./boattools tide --atlas channel.btsa --lat 48.6 --lon=-5.1       # the stream now
+./boattools tide --atlas channel.btsa --lat 48.6 --lon=-5.1 --hours 12
+```
+
+A negative longitude needs `--lon=-5.1` rather than `--lon -5.1`, or the
+argument parser reads it as a flag.

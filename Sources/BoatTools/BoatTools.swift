@@ -581,6 +581,7 @@ struct BoatToolsCLI: AsyncParsableCommand {
 			DiscoverCommand.self,
 			GMDSSCommand.self,
 			SimulateCommand.self,
+			TideCommand.self,
 		])
 }
 
@@ -1625,5 +1626,104 @@ struct DiscoverCommand: AsyncParsableCommand {
 		// endpoint.url already encodes the right scheme (http/ws/tcp).
 		let cmd = try ConnectCommand.parse(["--url", endpoint.url])
 		try await cmd.run()
+	}
+}
+
+// =============================================================================
+// MARK: - tide (predicted tidal streams)
+// =============================================================================
+
+struct TideCommand: AsyncParsableCommand {
+	static let configuration = CommandConfiguration(
+		commandName: "tide",
+		abstract: "Predict tidal streams from a converted FES atlas")
+
+	@Option(
+		name: .shortAndLong,
+		help: ArgumentHelp(
+			"Atlas written by Scripts/fes-currents-to-atlas.py", valueName: "path"))
+	var atlas: String
+
+	@Option(help: ArgumentHelp("Latitude, decimal degrees (N+)", valueName: "deg"))
+	var lat: Double?
+
+	@Option(help: ArgumentHelp("Longitude, decimal degrees (E+)", valueName: "deg"))
+	var lon: Double?
+
+	@Option(
+		help: ArgumentHelp("Start of the prediction, ISO 8601 — default now", valueName: "when"))
+	var at: String?
+
+	@Option(help: ArgumentHelp("Hours to tabulate from the start, every half hour", valueName: "h"))
+	var hours: Double = 0
+
+	@Flag(help: "Describe the atlas instead of predicting with it")
+	var info = false
+
+	func validate() throws {
+		if !info && (lat == nil || lon == nil) {
+			throw ValidationError("Give --lat and --lon, or --info to describe the atlas.")
+		}
+	}
+
+	func run() async throws {
+		let streams = try TidalStreamAtlas(contentsOf: URL(fileURLWithPath: atlas))
+		let grid = streams.grid
+		print(
+			String(
+				format: "%@ — %d×%d nodes from %.4f, %.4f by %.5f°, %d constituents",
+				URL(fileURLWithPath: atlas).lastPathComponent, grid.rows, grid.columns,
+				grid.latitudeMinimum, grid.longitudeMinimum, grid.longitudeStep,
+				streams.constituents.count))
+		if info {
+			print("  " + streams.constituents.map(\.name).joined(separator: " "))
+			if !streams.unsupportedConstituents.isEmpty {
+				print("  not predicted with: " + streams.unsupportedConstituents.joined(separator: " "))
+			}
+			print(
+				"""
+				  A prediction, not a measurement: the grid is barotropic and about four
+				  miles across, so it resolves no race, overfall or headland eddy.
+				""")
+			return
+		}
+
+		guard let lat, let lon else { return }
+		let start = try Self.instant(at)
+		let steps = max(1, Int((hours * 2).rounded()) + (hours > 0 ? 1 : 0))
+		for step in 0..<steps {
+			let when = start.addingTimeInterval(Double(step) * 1_800)
+			let stamp = Self.stamp(when)
+			guard let stream = streams.stream(latitude: lat, longitude: lon, at: when) else {
+				print("\(stamp)  no prediction — off the atlas, or ashore")
+				continue
+			}
+			print(
+				String(
+					format: "%@  set %03.0f°  drift %.2f kn", stamp, stream.set.rounded(),
+					stream.drift))
+		}
+	}
+
+	/// How an instant is printed in the table.
+	private static func stamp(_ date: Date) -> String {
+		let formatter = ISO8601DateFormatter()
+		formatter.formatOptions = [.withInternetDateTime]
+		return formatter.string(from: date)
+	}
+
+	/// Reads the instant to start from, defaulting to now.
+	private static func instant(_ text: String?) throws -> Date {
+		guard let text else { return Date() }
+		let formatter = ISO8601DateFormatter()
+		for options in [
+			[.withInternetDateTime] as ISO8601DateFormatter.Options,
+			[.withInternetDateTime, .withFractionalSeconds],
+			[.withFullDate, .withTime, .withColonSeparatorInTime, .withTimeZone],
+		] {
+			formatter.formatOptions = options
+			if let date = formatter.date(from: text) { return date }
+		}
+		throw ValidationError("Could not read --at \(text); use 2026-11-08T14:30:00Z.")
 	}
 }

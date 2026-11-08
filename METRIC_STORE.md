@@ -315,7 +315,10 @@ What is *not* derived, and why: the leeway from a heel coefficient (`K · heel /
 STW²`) needs a per-boat `K`, so it belongs to the host application's settings
 rather than here; and a predicted tidal stream from a harmonic atlas is a
 forecast, not a measurement, and has no business in a store fed by the boat's
-own instruments.
+own instruments. The prediction lives in `TidalStreamAtlas` instead, documented
+in [TIDAL_STREAMS.md](TIDAL_STREAMS.md), and writes nothing here: the measured
+stream and the predicted one are two independent accounts of the same water,
+which is worth more than either dressed up as the other.
 
 ---
 
