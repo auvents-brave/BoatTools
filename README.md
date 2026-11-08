@@ -252,7 +252,7 @@ Which NMEA 0183 sentences, NMEA 2000 PGNs and Signal K paths `BoatToolsKit` deco
 Where the atlas comes from, how it is converted, the file format and the harmonic maths behind a predicted stream. Full document: [`TIDAL_STREAMS.md`](TIDAL_STREAMS.md).
 
 - [BoatTools — Tidal streams](TIDAL_STREAMS.md)
-  - [Getting the data](TIDAL_STREAMS.md#getting-the-data)
+  - [Getting the data](TIDAL_STREAMS.md#getting-the-data) — and why FES2014a rather than the newest FES
   - [Converting it](TIDAL_STREAMS.md#converting-it)
   - [The file format](TIDAL_STREAMS.md#the-file-format)
   - [Predicting with it](TIDAL_STREAMS.md#predicting-with-it)

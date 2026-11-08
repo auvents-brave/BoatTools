@@ -23,13 +23,8 @@ is wrong with the log calibration, the heading, or the prediction.
 ## Getting the data
 
 The atlas itself is **not distributed with this library**. It comes from
-[AVISO/CNES](https://www.aviso.altimetry.fr/en/data/products/auxiliary-products/global-tide-fes.html),
-whose page states that *"FES2014 Tide heights and currents are delivered for all
-purposes (scientific, commercial,...)"* and refers to the Aviso licence
-agreement for the terms. The files sit on an authenticated FTP server, so an
-account is needed; read the licence at registration rather than trusting this
-paragraph, because the wording has changed between releases and it is a legal
-question, not a technical one. Attribution is expected.
+[AVISO+/CNES](https://www.aviso.altimetry.fr/en/data/products/auxiliary-products/global-tide-fes.html),
+over an authenticated FTP server, so an account is needed.
 
 What to fetch, from the `fes2014a_currents` folder:
 
@@ -39,14 +34,54 @@ What to fetch, from the `fes2014a_currents` folder:
 | `northward_velocity.tar.xz` | the same 34, northward |
 
 One NetCDF 4 file per constituent per direction, on a 1/16° global grid with no
-extrapolation over the coasts. Two things to know before downloading:
+extrapolation over the coasts. Global, 34 constituents, two directions is tens
+of gigabytes: you want a box, not the world, which is what the converter is for.
 
-- It is the **FES2014a** solution that carries currents, not FES2014b. FES2022
-  currents are *not* distributed openly — they go out on request only.
-- Global, 34 constituents, two directions is tens of gigabytes. You want a box,
-  not the world, which is what the converter is for.
+### Why FES2014a and not the newest
 
----
+It is the **FES2014a** solution that carries currents, not FES2014b. And the
+version matters for more than the data, because of how the licence is written.
+
+The [AVISO License Agreement](https://www.aviso.altimetry.fr/fileadmin/documents/data/License_Aviso.pdf)
+(Issue 20, effective 10 August 2026) is modelled on CC-BY 4.0: worldwide,
+royalty-free, irrevocable, and explicitly good for commercial use — with two
+conditions of its own, and one annex that applies to tidal currents in
+particular.
+
+**Annex A puts the currents of the *latest released* FES version under
+non-commercial use only** — currently FES2022 — and says plainly that when a
+newer version appears the restriction moves to it and the previous version
+"becomes available under the standard License terms (including for Commercial
+Use)". So FES2022 currents need a separate agreement with CNES and NOVELTIS;
+FES2014a currents, one release behind, do not. That is also why FES2022 currents
+are only handed out on request while FES2014's are on the open FTP, and why the
+product page can say FES2014 heights and currents are delivered for all
+purposes.
+
+The practical reading: **use FES2014a, and do not quietly upgrade to whichever
+FES carries currents next** without checking Annex A again. The AVISO Catalogue
+is the authority on which version is current, and the licence is versioned, so
+re-read the issue in force rather than this paragraph. None of this is legal
+advice.
+
+### What the licence asks in return
+
+- **Attribution, whenever the data or anything derived from it is shared**
+  (§3.1): the creator and CNES as licensor, a citation to the source — product
+  name, producer, DOI — a link to the licence, and an indication that it was
+  modified. A converted atlas *is* "Adapted Material", and shipping one inside
+  an application is sharing it, so the application has to carry the credit. The
+  reference for FES2014 is Lyard et al., *FES2014 global ocean tide atlas:
+  design and performance*, Ocean Science 17, 615–649, 2021
+  ([doi:10.5194/os-17-615-2021](https://doi.org/10.5194/os-17-615-2021)), the
+  model being the work of LEGOS, NOVELTIS and CLS with CNES.
+- **No bulk re-distribution of the original files** (§3.2): the unmodified data
+  must not be served through a web portal, public API or cloud platform without
+  written authorisation. This expressly does *not* restrict adapted material —
+  so shipping a converted `.btsa` is fine, and mirroring the source `.nc` files
+  is not. Keep the raw archives off any download repository.
+- No implication of endorsement by CNES or AVISO (§2.6), and the data comes
+  as-is with no warranty (§5).
 
 ## Converting it
 

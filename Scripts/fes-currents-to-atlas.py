@@ -23,7 +23,10 @@ Usage:
 
     fes-currents-to-atlas.py --selftest fixture.btsa
 
-The data itself is not redistributable with this script: see TIDAL_STREAMS.md.
+Use the FES2014a currents, not those of the latest FES release: Annex A of the
+AVISO licence puts the newest version's currents under non-commercial use only.
+The data itself does not ship with this script, and the original NetCDF files
+must not be mirrored onwards — see TIDAL_STREAMS.md.
 """
 
 from __future__ import annotations
